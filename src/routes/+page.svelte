@@ -8,7 +8,7 @@
   let errorMessage = $state<string | null>(null);
   let loading = $state(true);
 
-  onMount(async () => {
+onMount(async () => {
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     user = currentUser;
 
@@ -45,6 +45,8 @@
 {:else}
   <p>Autenticado como: <strong>{user.email}</strong></p>
   <button onclick={handleLogout}>Cerrar sesión</button>
+
+  <p><a href="/game">Entrar a Zona Prion</a></p>
 
   <hr />
 
