@@ -6,35 +6,77 @@
   let mapContainer: HTMLDivElement;
   let map: any = null;
   let userMarker: any = null;
+  let detectionCircle: any = null;
+  let zonePolygon: any = null;
   let positionStatus = $state<string>('Solicitando permiso de geolocalización...');
+  let zoneStatus = $state<string>('');
   let userPosition = $state<{ lat: number; lng: number } | null>(null);
   let watchId: number | null = null;
+  let L: any = null;
 
- onMount(async () => {
+  // Polígono de zona de juego de Sant Feliu (formato Leaflet: [lat, lng])
+  const ZONE_POLYGON: [number, number][] = [
+    [41.78222, 3.0313035],
+    [41.782544, 3.0309549],
+    [41.782352, 3.0297747],
+    [41.7820519, 3.0288466],
+    [41.7820159, 3.0279293],
+    [41.7808319, 3.0270066],
+    [41.7806559, 3.0269476],
+    [41.7800678, 3.0278167],
+    [41.7802719, 3.0280956],
+    [41.7802198, 3.0281654],
+    [41.7807119, 3.028852],
+    [41.7807599, 3.0287876],
+    [41.78222, 3.0313035]
+  ];
+
+  // Algoritmo ray casting para determinar si un punto está dentro de un polígono
+  function isInsidePolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const [yi, xi] = polygon[i];
+      const [yj, xj] = polygon[j];
+      const intersect = ((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  onMount(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       goto('/login');
       return;
     }
 
-    const L = (await import('leaflet')).default;
+    L = (await import('leaflet')).default;
     await import('leaflet/dist/leaflet.css');
 
-    // Fix iconos Leaflet: borrar configuración por defecto y forzar URLs absolutas
     delete (L.Icon.Default.prototype as any)._getIconUrl;
-
     L.Icon.Default.mergeOptions({
       iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
       iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
       shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
     });
 
-    map = L.map(mapContainer).setView([41.7811, 3.0306], 17);
+    map = L.map(mapContainer).setView([41.7811, 3.029], 16);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap',
       maxZoom: 19
     }).addTo(map);
+
+    // Dibujar polígono de zona
+    zonePolygon = L.polygon(ZONE_POLYGON, {
+      color: '#2d7a2d',
+      fillColor: '#2d7a2d',
+      fillOpacity: 0.15,
+      weight: 2
+    }).addTo(map);
+
+    // Ajustar el mapa al polígono inicialmente
+    map.fitBounds(zonePolygon.getBounds());
 
     if (!('geolocation' in navigator)) {
       positionStatus = 'Tu navegador no soporta geolocalización.';
@@ -43,9 +85,8 @@
 
     if ('permissions' in navigator) {
       const permission = await navigator.permissions.query({ name: 'geolocation' });
-
       if (permission.state === 'denied') {
-        positionStatus = 'Geolocalización bloqueada. Activa el permiso en la configuración del navegador (icono del candado en la barra de direcciones) y recarga la página.';
+        positionStatus = 'Geolocalización bloqueada. Activa el permiso en la configuración del navegador y recarga.';
         return;
       }
     }
@@ -57,10 +98,21 @@
         userPosition = { lat, lng };
         positionStatus = `Posición: ${lat.toFixed(6)}, ${lng.toFixed(6)} (±${Math.round(pos.coords.accuracy)}m)`;
 
+        const inside = isInsidePolygon(lat, lng, ZONE_POLYGON);
+        zoneStatus = inside ? 'En zona' : 'Fuera de zona';
+
         if (userMarker) {
           userMarker.setLatLng([lat, lng]);
+          detectionCircle.setLatLng([lat, lng]);
         } else {
           userMarker = L.marker([lat, lng]).addTo(map).bindPopup('Tu posición');
+          detectionCircle = L.circle([lat, lng], {
+            radius: 25,
+            color: '#d24747',
+            fillColor: '#d24747',
+            fillOpacity: 0.1,
+            weight: 1
+          }).addTo(map);
           map.setView([lat, lng], 17);
         }
       },
@@ -96,6 +148,9 @@
 <h1>Zona Prion</h1>
 
 <p>{positionStatus}</p>
+{#if zoneStatus}
+  <p style="color: {zoneStatus === 'En zona' ? 'green' : 'red'}; font-weight: bold;">{zoneStatus}</p>
+{/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
 
