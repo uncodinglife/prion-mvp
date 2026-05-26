@@ -10,11 +10,13 @@
   let zonePolygon: any = null;
   let positionStatus = $state<string>('Solicitando permiso de geolocalización...');
   let zoneStatus = $state<string>('');
+  let syncStatus = $state<string>('');
   let userPosition = $state<{ lat: number; lng: number } | null>(null);
   let watchId: number | null = null;
   let L: any = null;
+  let lastSentAt = 0;
+  const SYNC_INTERVAL_MS = 10000;
 
-  // Polígono de zona de juego de Sant Feliu (formato Leaflet: [lat, lng])
   const ZONE_POLYGON: [number, number][] = [
     [41.78222, 3.0313035],
     [41.782544, 3.0309549],
@@ -31,7 +33,6 @@
     [41.78222, 3.0313035]
   ];
 
-  // Algoritmo ray casting para determinar si un punto está dentro de un polígono
   function isInsidePolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
     let inside = false;
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -41,6 +42,34 @@
       if (intersect) inside = !inside;
     }
     return inside;
+  }
+
+  async function sendPositionToSupabase(lat: number, lng: number) {
+    const now = Date.now();
+    if (now - lastSentAt < SYNC_INTERVAL_MS) {
+      return;
+    }
+    lastSentAt = now;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const wkt = `POINT(${lng} ${lat})`;
+
+    const { error } = await supabase
+      .from('players')
+      .update({
+        position: wkt,
+        position_updated_at: new Date().toISOString()
+      })
+      .eq('id', user.id);
+
+    if (error) {
+      syncStatus = `Error sincronizando: ${error.message}`;
+      console.error('Error update position:', error);
+    } else {
+      syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
+    }
   }
 
   onMount(async () => {
@@ -67,7 +96,6 @@
       maxZoom: 19
     }).addTo(map);
 
-    // Dibujar polígono de zona
     zonePolygon = L.polygon(ZONE_POLYGON, {
       color: '#2d7a2d',
       fillColor: '#2d7a2d',
@@ -75,7 +103,6 @@
       weight: 2
     }).addTo(map);
 
-    // Ajustar el mapa al polígono inicialmente
     map.fitBounds(zonePolygon.getBounds());
 
     if (!('geolocation' in navigator)) {
@@ -115,6 +142,8 @@
           }).addTo(map);
           map.setView([lat, lng], 17);
         }
+
+        sendPositionToSupabase(lat, lng);
       },
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
@@ -150,6 +179,9 @@
 <p>{positionStatus}</p>
 {#if zoneStatus}
   <p style="color: {zoneStatus === 'En zona' ? 'green' : 'red'}; font-weight: bold;">{zoneStatus}</p>
+{/if}
+{#if syncStatus}
+  <p style="color: blue; font-size: 0.9em;">{syncStatus}</p>
 {/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
