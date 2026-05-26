@@ -13,6 +13,9 @@
   let syncStatus = $state<string>('');
   let userPosition = $state<{ lat: number; lng: number } | null>(null);
   let watchId: number | null = null;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let nearbyMarkers: Map<string, any> = new Map();
+  let nearbyStatus = $state<string>('Buscando otros jugadores...');
   let L: any = null;
   let lastSentAt = 0;
   const SYNC_INTERVAL_MS = 10000;
@@ -70,6 +73,60 @@
     } else {
       syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
     }
+  }
+async function pollNearbyPlayers() {
+    const { data, error } = await supabase
+      .from('nearby_players')
+      .select('*');
+
+    if (error) {
+      console.error('Error consultando nearby_players:', error);
+      nearbyStatus = `Error: ${error.message}`;
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      nearbyStatus = 'No hay jugadores cercanos';
+      nearbyMarkers.forEach((marker) => map.removeLayer(marker));
+      nearbyMarkers.clear();
+      return;
+    }
+
+    nearbyStatus = `${data.length} jugador(es) cercano(s)`;
+
+    const currentIds = new Set<string>();
+
+    for (const player of data) {
+      if (player.lat == null || player.lng == null) continue;
+
+      currentIds.add(player.id);
+
+      const color = player.role === 'civil' ? '#2d7a2d' : '#a02828';
+      const label = `${player.nick} (${player.role}) - ${Math.round(player.distance_meters)}m`;
+
+      const existingMarker = nearbyMarkers.get(player.id);
+      if (existingMarker) {
+        existingMarker.setLatLng([player.lat, player.lng]);
+        existingMarker.setPopupContent(label);
+      } else {
+        const newMarker = L.circleMarker([player.lat, player.lng], {
+          radius: 8,
+          color: color,
+          fillColor: color,
+          fillOpacity: 0.7,
+          weight: 2
+        }).addTo(map).bindPopup(label);
+        nearbyMarkers.set(player.id, newMarker);
+      }
+    }
+
+    // Borrar marcadores de jugadores que ya no están cerca
+    nearbyMarkers.forEach((marker, id) => {
+      if (!currentIds.has(id)) {
+        map.removeLayer(marker);
+        nearbyMarkers.delete(id);
+      }
+    });
   }
 
   onMount(async () => {
@@ -162,11 +219,17 @@
         timeout: 10000
       }
     );
+    // Polling de jugadores cercanos cada 5 segundos
+    await pollNearbyPlayers();
+    pollInterval = setInterval(pollNearbyPlayers, 5000);
   });
 
   onDestroy(() => {
     if (watchId !== null) {
       navigator.geolocation.clearWatch(watchId);
+    }
+    if (pollInterval !== null) {
+      clearInterval(pollInterval);
     }
     if (map) {
       map.remove();
@@ -182,6 +245,9 @@
 {/if}
 {#if syncStatus}
   <p style="color: blue; font-size: 0.9em;">{syncStatus}</p>
+{/if}
+{#if nearbyStatus}
+  <p style="color: purple; font-size: 0.9em;">{nearbyStatus}</p>
 {/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
