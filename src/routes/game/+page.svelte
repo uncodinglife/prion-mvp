@@ -20,21 +20,23 @@
   let lastSentAt = 0;
   const SYNC_INTERVAL_MS = 10000;
 
-  const ZONE_POLYGON: [number, number][] = [
-    [41.78222, 3.0313035],
-    [41.782544, 3.0309549],
-    [41.782352, 3.0297747],
-    [41.7820519, 3.0288466],
-    [41.7820159, 3.0279293],
-    [41.7808319, 3.0270066],
-    [41.7806559, 3.0269476],
-    [41.7800678, 3.0278167],
-    [41.7802719, 3.0280956],
-    [41.7802198, 3.0281654],
-    [41.7807119, 3.028852],
-    [41.7807599, 3.0287876],
-    [41.78222, 3.0313035]
-  ];
+  let zonePolygonCoords: [number, number][] = [];
+
+  async function loadZonePolygon(): Promise<[number, number][]> {
+    const { data, error } = await supabase.rpc('get_playable_zone');
+
+    if (error) {
+      console.error('Error cargando polígono de zona:', error);
+      return [];
+    }
+
+    if (!data || !data.coordinates || !data.coordinates[0]) {
+      return [];
+    }
+
+    // GeoJSON viene como [lng, lat], Leaflet quiere [lat, lng]
+    return data.coordinates[0].map((coord: [number, number]) => [coord[1], coord[0]]);
+  }
 
   function isInsidePolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
     let inside = false;
@@ -153,7 +155,14 @@ async function pollNearbyPlayers() {
       maxZoom: 19
     }).addTo(map);
 
-    zonePolygon = L.polygon(ZONE_POLYGON, {
+    zonePolygonCoords = await loadZonePolygon();
+
+    if (zonePolygonCoords.length === 0) {
+      positionStatus = 'No se pudo cargar la zona de juego.';
+      return;
+    }
+
+    zonePolygon = L.polygon(zonePolygonCoords, {
       color: '#2d7a2d',
       fillColor: '#2d7a2d',
       fillOpacity: 0.15,
@@ -182,7 +191,7 @@ async function pollNearbyPlayers() {
         userPosition = { lat, lng };
         positionStatus = `Posición: ${lat.toFixed(6)}, ${lng.toFixed(6)} (±${Math.round(pos.coords.accuracy)}m)`;
 
-        const inside = isInsidePolygon(lat, lng, ZONE_POLYGON);
+        const inside = isInsidePolygon(lat, lng, zonePolygonCoords);
         zoneStatus = inside ? 'En zona' : 'Fuera de zona';
 
         if (userMarker) {
