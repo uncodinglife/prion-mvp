@@ -18,6 +18,7 @@
   let nearbyStatus = $state<string>('Buscando otros jugadores...');
   let L: any = null;
   let lastSentAt = 0;
+  let encounterStatus = $state<string>('');
   const SYNC_INTERVAL_MS = 10000;
 
   let zonePolygonCoords: [number, number][] = [];
@@ -61,7 +62,7 @@
 
     const wkt = `POINT(${lng} ${lat})`;
 
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from('players')
       .update({
         position: wkt,
@@ -69,11 +70,27 @@
       })
       .eq('id', user.id);
 
-    if (error) {
-      syncStatus = `Error sincronizando: ${error.message}`;
-      console.error('Error update position:', error);
+    if (updateError) {
+      syncStatus = `Error sincronizando: ${updateError.message}`;
+      console.error('Error update position:', updateError);
+      return;
+    }
+
+    syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
+
+    // Invocar detección de encuentro
+    const { data: detectData, error: detectError } = await supabase.functions.invoke('detect_encounter');
+
+    if (detectError) {
+      console.error('Error detect_encounter:', detectError);
+      return;
+    }
+
+    if (detectData?.encounter) {
+      encounterStatus = `Encuentro con ${detectData.opponent_nick}. ID: ${detectData.encounter}`;
+      console.log('Encuentro detectado:', detectData);
     } else {
-      syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
+      console.log('Sin encuentro, respuesta completa:', detectData);
     }
   }
 async function pollNearbyPlayers() {
@@ -257,6 +274,9 @@ async function pollNearbyPlayers() {
 {/if}
 {#if nearbyStatus}
   <p style="color: purple; font-size: 0.9em;">{nearbyStatus}</p>
+{/if}
+{#if encounterStatus}
+  <p style="color: red; font-weight: bold; font-size: 1.1em;">{encounterStatus}</p>
 {/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
