@@ -428,3 +428,25 @@ entrypoint = "./functions/detect_encounter/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/detect_encounter/*.html" ]
+
+[functions.submit_decision]
+enabled = true
+verify_jwt = false
+import_map = "./functions/submit_decision/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/submit_decision/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/submit_decision/*.html" ]
+
+[functions.resolve_encounter]
+enabled = true
+verify_jwt = false
+import_map = "./functions/resolve_encounter/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/resolve_encounter/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/resolve_encounter/*.html" ]

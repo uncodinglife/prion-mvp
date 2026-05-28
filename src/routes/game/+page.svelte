@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { supabase } from '$lib/supabase';
   import { goto } from '$app/navigation';
+  import CombatOverlay from '$lib/CombatOverlay.svelte';
 
   let mapContainer: HTMLDivElement;
   let map: any = null;
@@ -11,31 +12,34 @@
   let positionStatus = $state<string>('Solicitando permiso de geolocalización...');
   let zoneStatus = $state<string>('');
   let syncStatus = $state<string>('');
+  let nearbyStatus = $state<string>('Buscando otros jugadores...');
+  let encounterStatus = $state<string>('');
   let userPosition = $state<{ lat: number; lng: number } | null>(null);
   let watchId: number | null = null;
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
-  let nearbyMarkers: Map<string, any> = new Map();
-  let nearbyStatus = $state<string>('Buscando otros jugadores...');
   let L: any = null;
   let lastSentAt = 0;
-  let encounterStatus = $state<string>('');
   const SYNC_INTERVAL_MS = 10000;
+
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let nearbyMarkers: Map<string, any> = new Map();
+
+  let activeEncounter = $state<any>(null);
+  let resolvedEncounter = $state<any>(null);
+  let resultMessage = $state<string>('');
+  let myRole = $state<string>('');
+  let encounterPollInterval: ReturnType<typeof setInterval> | null = null;
 
   let zonePolygonCoords: [number, number][] = [];
 
   async function loadZonePolygon(): Promise<[number, number][]> {
     const { data, error } = await supabase.rpc('get_playable_zone');
-
     if (error) {
       console.error('Error cargando polígono de zona:', error);
       return [];
     }
-
     if (!data || !data.coordinates || !data.coordinates[0]) {
       return [];
     }
-
-    // GeoJSON viene como [lng, lat], Leaflet quiere [lat, lng]
     return data.coordinates[0].map((coord: [number, number]) => [coord[1], coord[0]]);
   }
 
@@ -78,7 +82,6 @@
 
     syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
 
-    // Invocar detección de encuentro
     const { data: detectData, error: detectError } = await supabase.functions.invoke('detect_encounter');
 
     if (detectError) {
@@ -93,7 +96,8 @@
       console.log('Sin encuentro, respuesta completa:', detectData);
     }
   }
-async function pollNearbyPlayers() {
+
+  async function pollNearbyPlayers() {
     const { data, error } = await supabase
       .from('nearby_players')
       .select('*');
@@ -117,7 +121,6 @@ async function pollNearbyPlayers() {
 
     for (const player of data) {
       if (player.lat == null || player.lng == null) continue;
-
       currentIds.add(player.id);
 
       const color = player.role === 'civil' ? '#2d7a2d' : '#a02828';
@@ -139,13 +142,87 @@ async function pollNearbyPlayers() {
       }
     }
 
-    // Borrar marcadores de jugadores que ya no están cerca
     nearbyMarkers.forEach((marker, id) => {
       if (!currentIds.has(id)) {
         map.removeLayer(marker);
         nearbyMarkers.delete(id);
       }
     });
+  }
+
+  async function pollActiveEncounter() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    if (activeEncounter && !resolvedEncounter) {
+      const { data: enc } = await supabase
+        .from('encounters')
+        .select('*')
+        .eq('id', activeEncounter.id)
+        .single();
+
+      if (enc && enc.result !== null) {
+        resolvedEncounter = enc;
+        const { data: ev } = await supabase
+          .from('events')
+          .select('message')
+          .eq('related_encounter_id', enc.id)
+          .eq('player_id', user.id)
+          .eq('type', 'encounter_result')
+          .maybeSingle();
+        resultMessage = ev?.message ?? 'Combate resuelto.';
+        return;
+      }
+      return;
+    }
+
+    if (resolvedEncounter) return;
+
+    const { data: player, error: playerError } = await supabase
+      .from('players')
+      .select('role, current_encounter_id')
+      .eq('id', user.id)
+      .single();
+
+    if (playerError || !player) return;
+    myRole = player.role;
+
+    if (!player.current_encounter_id) return;
+
+    const { data: encounter, error: encError } = await supabase
+      .from('encounters')
+      .select('*')
+      .eq('id', player.current_encounter_id)
+      .single();
+
+    if (encError || !encounter) return;
+    if (encounter.result !== null) return;
+
+    activeEncounter = encounter;
+  }
+
+  async function handleCombatDecision(decision: string) {
+    if (!activeEncounter) return;
+
+    const { data, error } = await supabase.functions.invoke('submit_decision', {
+      body: {
+        encounter_id: activeEncounter.id,
+        decision: decision
+      }
+    });
+
+    if (error) {
+      console.error('Error submit_decision:', error);
+      return;
+    }
+
+    console.log('Decisión registrada:', data);
+  }
+
+  function closeCombat() {
+    activeEncounter = null;
+    resolvedEncounter = null;
+    resultMessage = '';
   }
 
   onMount(async () => {
@@ -245,9 +322,12 @@ async function pollNearbyPlayers() {
         timeout: 10000
       }
     );
-    // Polling de jugadores cercanos cada 5 segundos
+
     await pollNearbyPlayers();
     pollInterval = setInterval(pollNearbyPlayers, 5000);
+
+    await pollActiveEncounter();
+    encounterPollInterval = setInterval(pollActiveEncounter, 3000);
   });
 
   onDestroy(() => {
@@ -256,6 +336,9 @@ async function pollNearbyPlayers() {
     }
     if (pollInterval !== null) {
       clearInterval(pollInterval);
+    }
+    if (encounterPollInterval !== null) {
+      clearInterval(encounterPollInterval);
     }
     if (map) {
       map.remove();
@@ -280,5 +363,16 @@ async function pollNearbyPlayers() {
 {/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
+
+{#if activeEncounter}
+  <CombatOverlay
+    encounter={activeEncounter}
+    myRole={myRole}
+    resolved={resolvedEncounter}
+    resultMessage={resultMessage}
+    onDecision={handleCombatDecision}
+    onClose={closeCombat}
+  />
+{/if}
 
 <p><a href="/">Volver</a></p>
