@@ -131,24 +131,24 @@ Deno.serve(async (req: Request) => {
     const bothDecided = updated.civil_decision !== null && updated.zombie_decision !== null;
 
     if (bothDecided) {
-      // Invocar resolve_encounter llamando a la función directamente vía fetch interno
-      const resolveUrl = `${supabaseUrl}/functions/v1/resolve_encounter`;
-      const resolveResp = await fetch(resolveUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!}`
-        },
-        body: JSON.stringify({ encounter_id })
-      });
+      const { data: resolveData, error: resolveError } = await supabaseAdmin.rpc(
+        "compute_and_resolve_encounter",
+        { p_encounter_id: encounter_id }
+      );
 
-      const resolveData = await resolveResp.json();
+      if (resolveError) {
+        return new Response(
+          JSON.stringify({ ok: true, decision, both_decided: true, resolve_error: resolveError.message }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
 
       return new Response(
         JSON.stringify({ ok: true, decision, both_decided: true, resolved: resolveData }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
 
     return new Response(
       JSON.stringify({ ok: true, decision, both_decided: false }),
