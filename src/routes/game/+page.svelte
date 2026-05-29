@@ -3,6 +3,7 @@
   import { supabase } from '$lib/supabase';
   import { goto } from '$app/navigation';
   import CombatOverlay from '$lib/CombatOverlay.svelte';
+  import RadioReceptora from '$lib/RadioReceptora.svelte';
 
   let mapContainer: HTMLDivElement;
   let map: any = null;
@@ -18,6 +19,7 @@
   let watchId: number | null = null;
   let L: any = null;
   let lastSentAt = 0;
+  let radioEvents = $state<any[]>([]);
   const SYNC_INTERVAL_MS = 10000;
 
   let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -28,6 +30,7 @@
   let resultMessage = $state<string>('');
   let myRole = $state<string>('');
   let encounterPollInterval: ReturnType<typeof setInterval> | null = null;
+  let radioPollInterval: ReturnType<typeof setInterval> | null = null;
 
   let zonePolygonCoords: [number, number][] = [];
 
@@ -91,10 +94,7 @@
 
     if (detectData?.encounter) {
       encounterStatus = `Encuentro con ${detectData.opponent_nick}. ID: ${detectData.encounter}`;
-      console.log('Encuentro detectado:', detectData);
-    } else {
-      console.log('Sin encuentro, respuesta completa:', detectData);
-    }
+    } 
   }
 
   async function pollNearbyPlayers() {
@@ -216,13 +216,30 @@
       return;
     }
 
-    console.log('Decisión registrada:', data);
   }
 
   function closeCombat() {
     activeEncounter = null;
     resolvedEncounter = null;
     resultMessage = '';
+  }
+async function pollRadioEvents() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('events')
+      .select('id, type, message, created_at')
+      .eq('player_id', user.id)
+      .order('created_at', { ascending: true })
+      .limit(50);
+
+    if (error) {
+      console.error('Error consultando events:', error);
+      return;
+    }
+
+    radioEvents = data ?? [];
   }
 
   onMount(async () => {
@@ -328,6 +345,9 @@
 
     await pollActiveEncounter();
     encounterPollInterval = setInterval(pollActiveEncounter, 3000);
+
+    await pollRadioEvents();
+    radioPollInterval = setInterval(pollRadioEvents, 5000);
   });
 
   onDestroy(() => {
@@ -339,6 +359,9 @@
     }
     if (encounterPollInterval !== null) {
       clearInterval(encounterPollInterval);
+    }
+    if (radioPollInterval !== null) {
+      clearInterval(radioPollInterval);
     }
     if (map) {
       map.remove();
@@ -363,6 +386,7 @@
 {/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
+<RadioReceptora events={radioEvents} />
 
 {#if activeEncounter}
   <CombatOverlay
