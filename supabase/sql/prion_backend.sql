@@ -428,7 +428,7 @@ BEGIN
   WHERE id = v_session.id;
 
   INSERT INTO events (player_id, type, message)
-  SELECT p.id, 'game_over',
+  SELECT p.id, 'game_end',
     CASE WHEN v_winner = 'civils'
       THEN 'Silencio en las calles. Los supervivientes han resistido. Fin de la partida.'
       ELSE 'La horda ha tomado la ciudad. No queda nadie a quien salvar. Fin de la partida.'
@@ -521,4 +521,4 @@ GRANT EXECUTE ON FUNCTION public.close_game()           TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_final_report(UUID) TO authenticated;
 
 -- PENDIENTE (próxima sesión): pantalla final en el cliente (hook al evento
--- 'game_over' + llamada a get_final_report). Backend de cierre: HECHO.
+-- 'game_end' + llamada a get_final_report). Backend de cierre: HECHO.
