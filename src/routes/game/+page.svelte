@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import CombatOverlay from '$lib/CombatOverlay.svelte';
   import RadioReceptora from '$lib/RadioReceptora.svelte';
+  import FinalScreen from '$lib/FinalScreen.svelte';
 
   let mapContainer: HTMLDivElement;
   let map: any = null;
@@ -31,6 +32,9 @@
   let myRole = $state<string>('');
   let encounterPollInterval: ReturnType<typeof setInterval> | null = null;
   let radioPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  let gameEnded = $state<boolean>(false);
+  let finalReport = $state<any>(null);
 
   let zonePolygonCoords: [number, number][] = [];
 
@@ -223,6 +227,23 @@
     resolvedEncounter = null;
     resultMessage = '';
   }
+
+  async function handleGameEnd(userId: string) {
+    gameEnded = true;
+
+    // Congelar la pantalla: detener geolocalización y todos los polls.
+    if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+    if (pollInterval !== null) { clearInterval(pollInterval); pollInterval = null; }
+    if (encounterPollInterval !== null) { clearInterval(encounterPollInterval); encounterPollInterval = null; }
+    if (radioPollInterval !== null) { clearInterval(radioPollInterval); radioPollInterval = null; }
+
+    const { data, error } = await supabase.rpc('get_final_report', { p_player_id: userId });
+    if (error) {
+      console.error('Error get_final_report:', error);
+      return;
+    }
+    finalReport = data;
+  }
 async function pollRadioEvents() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -240,6 +261,10 @@ async function pollRadioEvents() {
     }
 
     radioEvents = data ?? [];
+
+    if (!gameEnded && radioEvents.some((e) => e.type === 'game_end')) {
+      await handleGameEnd(user.id);
+    }
   }
 
   onMount(async () => {
@@ -397,6 +422,10 @@ async function pollRadioEvents() {
     onDecision={handleCombatDecision}
     onClose={closeCombat}
   />
+{/if}
+
+{#if gameEnded && finalReport}
+  <FinalScreen report={finalReport} />
 {/if}
 
 <p><a href="/">Volver</a></p>
