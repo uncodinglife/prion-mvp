@@ -70,6 +70,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
+    background: #0a1f12;
   }
 
   .radio-empty {
