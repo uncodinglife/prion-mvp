@@ -2,7 +2,21 @@
 -- PROYECTO PRION - Lógica de base de datos (Supabase / PostgreSQL + PostGIS)
 -- Respaldo y documentación de funciones SQL y crons.
 -- Este archivo refleja lo desplegado en Supabase (project ref: uziyxukcasjmvcemtonp).
+-- NOTA: este archivo NO se despliega solo. Es una copia manual de lo que
+-- está en la base de datos; se mantiene a mano. Las tablas base (players,
+-- encounters, events, game_session) se crearon en el setup inicial y no se
+-- reproducen aquí; abajo solo van las columnas AÑADIDAS después.
 -- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- COLUMNAS AÑADIDAS (sobre las tablas base)
+-- ---------------------------------------------------------------------
+-- game_session.final_report : informe global congelado al cerrar la partida.
+-- encounters.civil_timed_out / zombie_timed_out : marca si la decisión la
+--   rellenó el timeout (acción por defecto) en vez de elegirla el jugador.
+ALTER TABLE game_session ADD COLUMN IF NOT EXISTS final_report jsonb;
+ALTER TABLE encounters  ADD COLUMN IF NOT EXISTS civil_timed_out  boolean NOT NULL DEFAULT false;
+ALTER TABLE encounters  ADD COLUMN IF NOT EXISTS zombie_timed_out boolean NOT NULL DEFAULT false;
 
 -- ---------------------------------------------------------------------
 -- TRIGGER: creación automática de fila en players al registrarse usuario
@@ -71,6 +85,23 @@ AS $$
 $$;
 
 -- ---------------------------------------------------------------------
+-- ESTADO DE PARTIDA: ¿está en juego?
+-- Falso en cuanto NOW() >= end_time, aunque el status siga en 'active'
+-- (freeze del mundo al segundo, sin depender de la latencia del cron de cierre).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.is_game_active()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM game_session
+    WHERE status = 'active' AND NOW() < end_time
+  );
+$$;
+
+-- ---------------------------------------------------------------------
 -- DETECCIÓN: encontrar rival cercano del rol opuesto (<25m)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.find_nearby_opponent(
@@ -101,6 +132,7 @@ $$;
 
 -- ---------------------------------------------------------------------
 -- ENCUENTRO: creación transaccional (evita race conditions)
+-- Guard de freeze: tras el cierre devuelve NULL (no se crean encuentros).
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_encounter_transaction(
   p_civil_id UUID,
@@ -114,6 +146,7 @@ AS $$
 DECLARE
   v_encounter_id UUID;
 BEGIN
+  IF NOT public.is_game_active() THEN RETURN NULL; END IF;  -- no se crean encuentros tras el cierre
   PERFORM 1 FROM players WHERE id IN (p_civil_id, p_zombie_id) FOR UPDATE;
   IF EXISTS (SELECT 1 FROM players WHERE id IN (p_civil_id, p_zombie_id)
              AND current_encounter_id IS NOT NULL) THEN
@@ -136,6 +169,8 @@ $$;
 -- COMBATE: cálculo + resolución completa (motor único de combate)
 -- Tabla de daños, dado con re-tirada en empate (guarda todas las tiradas),
 -- conversión, neutralización, cooldowns y eventos. Todo atómico.
+-- (Sin guard de freeze: un combate con ambas decisiones ya puestas justo
+--  antes del cierre se deja terminar; no se crean nuevos.)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.compute_and_resolve_encounter(p_encounter_id UUID)
 RETURNS JSONB
@@ -252,7 +287,9 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------
--- TIMEOUT: rellena decisiones por defecto y resuelve encuentros vencidos
+-- TIMEOUT: rellena decisiones por defecto y resuelve encuentros vencidos.
+-- Marca civil_timed_out / zombie_timed_out al rellenar por defecto.
+-- Guard de freeze: tras el cierre no resuelve nada.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.apply_timeouts()
 RETURNS INT
@@ -262,16 +299,17 @@ SET search_path = public, extensions
 AS $$
 DECLARE v_enc RECORD; v_resolved_count INT := 0;
 BEGIN
+  IF NOT public.is_game_active() THEN RETURN 0; END IF;  -- mundo congelado tras el cierre
   FOR v_enc IN
     SELECT id, civil_decision, zombie_decision FROM encounters
     WHERE result IS NULL AND started_at < NOW() - INTERVAL '16 seconds'
   LOOP
     IF v_enc.civil_decision IS NULL THEN
-      UPDATE encounters SET civil_decision='HUIR', civil_decision_at=NOW()
+      UPDATE encounters SET civil_decision='HUIR', civil_decision_at=NOW(), civil_timed_out=true
       WHERE id=v_enc.id AND civil_decision IS NULL;
     END IF;
     IF v_enc.zombie_decision IS NULL THEN
-      UPDATE encounters SET zombie_decision='MORDER', zombie_decision_at=NOW()
+      UPDATE encounters SET zombie_decision='MORDER', zombie_decision_at=NOW(), zombie_timed_out=true
       WHERE id=v_enc.id AND zombie_decision IS NULL;
     END IF;
     BEGIN
@@ -286,13 +324,14 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------
--- CRONS DE MANTENIMIENTO
+-- CRONS DE MANTENIMIENTO (con guard de freeze)
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.regenerate_civils()
 RETURNS INT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
 AS $$
 DECLARE v_count INT;
 BEGIN
+  IF NOT public.is_game_active() THEN RETURN 0; END IF;
   UPDATE players SET life = life + 1
   WHERE role='civil' AND status='active' AND life > 0 AND life < 10;
   GET DIAGNOSTICS v_count = ROW_COUNT;
@@ -305,6 +344,7 @@ RETURNS INT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensio
 AS $$
 DECLARE v_count INT;
 BEGIN
+  IF NOT public.is_game_active() THEN RETURN 0; END IF;
   UPDATE players SET life=10, status='active', status_until=NULL
   WHERE status='neutralized' AND status_until IS NOT NULL AND status_until <= NOW();
   GET DIAGNOSTICS v_count = ROW_COUNT;
@@ -317,10 +357,145 @@ RETURNS INT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensio
 AS $$
 DECLARE v_count INT;
 BEGIN
+  IF NOT public.is_game_active() THEN RETURN 0; END IF;
   UPDATE players SET status='active', status_until=NULL
   WHERE status='radar_disabled' AND status_until IS NOT NULL AND status_until <= NOW();
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_count;
+END;
+$$;
+
+-- ---------------------------------------------------------------------
+-- CIERRE DE PARTIDA: calcula victoria, congela informe global, avisa a todos.
+-- Idempotente: solo actúa sobre una sesión 'active' cuyo end_time ya venció,
+-- bloqueada (FOR UPDATE) para que dos ticks del cron no entren a la vez.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.close_game()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_session game_session%ROWTYPE;
+  v_civil_count INT;
+  v_winner TEXT;
+  v_report jsonb;
+BEGIN
+  SELECT * INTO v_session
+  FROM game_session
+  WHERE status = 'active' AND end_time <= NOW()
+  ORDER BY start_time DESC
+  LIMIT 1
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('closed', false);
+  END IF;
+
+  -- Civil vivo == role 'civil' (un civil nunca tiene vida <= 0; al caer se convierte).
+  SELECT COUNT(*) INTO v_civil_count FROM players WHERE role = 'civil';
+  v_winner := CASE WHEN v_civil_count >= 5 THEN 'civils' ELSE 'zombies' END;
+
+  v_report := jsonb_build_object(
+    'winning_side',          v_winner,
+    'civils_alive',          v_civil_count,
+    'zombies_count',         (SELECT COUNT(*) FROM players WHERE role = 'zombie'),
+    'encounters_total',      (SELECT COUNT(*) FROM encounters WHERE result IS NOT NULL),
+    'conversions_total',     (SELECT COUNT(*) FROM events WHERE type = 'conversion'),
+    'neutralizations_total', (SELECT COUNT(*) FROM events WHERE type = 'neutralization'),
+    'timeout_resolved',      (SELECT COUNT(*) FROM encounters
+                              WHERE result IS NOT NULL AND (civil_timed_out OR zombie_timed_out)),
+    'result_breakdown', (
+      SELECT COALESCE(jsonb_object_agg(result, n), '{}'::jsonb)
+      FROM (SELECT result, COUNT(*) n FROM encounters WHERE result IS NOT NULL GROUP BY result) s
+    ),
+    'civil_decisions', (
+      SELECT COALESCE(jsonb_object_agg(civil_decision, n), '{}'::jsonb)
+      FROM (SELECT civil_decision, COUNT(*) n FROM encounters
+            WHERE civil_decision IS NOT NULL GROUP BY civil_decision) s
+    ),
+    'zombie_decisions', (
+      SELECT COALESCE(jsonb_object_agg(zombie_decision, n), '{}'::jsonb)
+      FROM (SELECT zombie_decision, COUNT(*) n FROM encounters
+            WHERE zombie_decision IS NOT NULL GROUP BY zombie_decision) s
+    ),
+    'closed_at', NOW()
+  );
+
+  UPDATE game_session
+  SET status = 'finished', winning_side = v_winner, final_report = v_report
+  WHERE id = v_session.id;
+
+  INSERT INTO events (player_id, type, message)
+  SELECT p.id, 'game_over',
+    CASE WHEN v_winner = 'civils'
+      THEN 'Silencio en las calles. Los supervivientes han resistido. Fin de la partida.'
+      ELSE 'La horda ha tomado la ciudad. No queda nadie a quien salvar. Fin de la partida.'
+    END
+  FROM players p;
+
+  RETURN jsonb_build_object('closed', true, 'winning_side', v_winner, 'report', v_report);
+END;
+$$;
+
+-- ---------------------------------------------------------------------
+-- INFORME FINAL para un jugador: global (congelado) + individual (en vivo).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.get_final_report(p_player_id UUID)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_global jsonb;
+  v_individual jsonb;
+BEGIN
+  SELECT final_report INTO v_global
+  FROM game_session
+  WHERE status = 'finished'
+  ORDER BY end_time DESC
+  LIMIT 1;
+
+  IF v_global IS NULL THEN
+    RETURN jsonb_build_object('available', false);
+  END IF;
+
+  v_individual := jsonb_build_object(
+    'encounters_total', (
+      SELECT COUNT(*) FROM encounters
+      WHERE result IS NOT NULL AND (civil_id = p_player_id OR zombie_id = p_player_id)
+    ),
+    'as_civil_decisions', (
+      SELECT COALESCE(jsonb_object_agg(civil_decision, n), '{}'::jsonb)
+      FROM (SELECT civil_decision, COUNT(*) n FROM encounters
+            WHERE civil_id = p_player_id AND civil_decision IS NOT NULL
+            GROUP BY civil_decision) s
+    ),
+    'as_zombie_decisions', (
+      SELECT COALESCE(jsonb_object_agg(zombie_decision, n), '{}'::jsonb)
+      FROM (SELECT zombie_decision, COUNT(*) n FROM encounters
+            WHERE zombie_id = p_player_id AND zombie_decision IS NOT NULL
+            GROUP BY zombie_decision) s
+    ),
+    -- Zombies que neutralicé (yo era el civil del encuentro y el rival cayó a 0).
+    'neutralizations_caused', (
+      SELECT COUNT(*) FROM events e
+      JOIN encounters enc ON enc.id = e.related_encounter_id
+      WHERE e.type = 'neutralization' AND enc.civil_id = p_player_id
+    ),
+    -- Civiles que convertí (yo era el zombie del encuentro y el rival cayó a 0).
+    'conversions_caused', (
+      SELECT COUNT(*) FROM events e
+      JOIN encounters enc ON enc.id = e.related_encounter_id
+      WHERE e.type = 'conversion' AND enc.zombie_id = p_player_id
+    ),
+    'times_converted',   (SELECT COUNT(*) FROM events WHERE type = 'conversion'     AND player_id = p_player_id),
+    'times_neutralized', (SELECT COUNT(*) FROM events WHERE type = 'neutralization' AND player_id = p_player_id)
+  );
+
+  RETURN jsonb_build_object('available', true, 'global', v_global, 'individual', v_individual);
 END;
 $$;
 
@@ -330,11 +505,20 @@ $$;
 --   restore-zombies    : '30 seconds'  -> SELECT public.restore_zombies();
 --   restore-radar      : '30 seconds'  -> SELECT public.restore_radar();
 --   regenerate-civils  : '0 * * * *'   -> SELECT public.regenerate_civils();
+--   close-game         : '30 seconds'  -> SELECT public.close_game();
+-- (close-game se programó con: SELECT cron.schedule('close-game','30 seconds',$$SELECT public.close_game();$$);)
 -- ---------------------------------------------------------------------
 
--- GRANTS (todas las funciones de servidor a service_role; las de lectura a authenticated)
+-- ---------------------------------------------------------------------
+-- GRANTS
+-- Funciones de lectura -> authenticated; funciones de servidor -> service_role.
+-- ---------------------------------------------------------------------
 -- get_playable_zone, is_inside_zone, find_nearby_opponent: GRANT EXECUTE ... TO authenticated;
 -- create_encounter_transaction, compute_and_resolve_encounter, apply_timeouts,
 -- regenerate_civils, restore_zombies, restore_radar: GRANT EXECUTE ... TO service_role;
+GRANT EXECUTE ON FUNCTION public.is_game_active()       TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.close_game()           TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_final_report(UUID) TO authenticated;
 
--- PENDIENTE (próxima sesión): función close_game + cron, condición de victoria.
+-- PENDIENTE (próxima sesión): pantalla final en el cliente (hook al evento
+-- 'game_over' + llamada a get_final_report). Backend de cierre: HECHO.
