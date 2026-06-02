@@ -5,6 +5,7 @@
   import CombatOverlay from '$lib/CombatOverlay.svelte';
   import RadioReceptora from '$lib/RadioReceptora.svelte';
   import FinalScreen from '$lib/FinalScreen.svelte';
+  import { unlockAudio, playEncounter, playGameEnd, playZoneEnter } from '$lib/sounds';
 
   let mapContainer: HTMLDivElement;
   let map: any = null;
@@ -15,11 +16,11 @@
   let zoneStatus = $state<string>('');
   let syncStatus = $state<string>('');
   let nearbyStatus = $state<string>('Buscando otros jugadores...');
-  let encounterStatus = $state<string>('');
   let userPosition = $state<{ lat: number; lng: number } | null>(null);
   let watchId: number | null = null;
   let L: any = null;
   let lastSentAt = 0;
+  let wasInside: boolean | null = null;
   let radioEvents = $state<any[]>([]);
   const SYNC_INTERVAL_MS = 10000;
 
@@ -96,9 +97,6 @@
       return;
     }
 
-    if (detectData?.encounter) {
-      encounterStatus = `Encuentro con ${detectData.opponent_nick}. ID: ${detectData.encounter}`;
-    } 
   }
 
   async function pollNearbyPlayers() {
@@ -203,6 +201,7 @@
     if (encounter.result !== null) return;
 
     activeEncounter = encounter;
+    playEncounter();
   }
 
   async function handleCombatDecision(decision: string) {
@@ -230,6 +229,7 @@
 
   async function handleGameEnd(userId: string) {
     gameEnded = true;
+    playGameEnd();
 
     // Congelar la pantalla: detener geolocalización y todos los polls.
     if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
@@ -276,6 +276,13 @@ async function pollRadioEvents() {
 
     L = (await import('leaflet')).default;
     await import('leaflet/dist/leaflet.css');
+
+    // Desbloquear el audio en el primer toque del usuario (los navegadores lo exigen).
+    const unlock = () => {
+      unlockAudio();
+      window.removeEventListener('pointerdown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock);
 
     delete (L.Icon.Default.prototype as any)._getIconUrl;
     L.Icon.Default.mergeOptions({
@@ -329,6 +336,12 @@ async function pollRadioEvents() {
 
         const inside = isInsidePolygon(lat, lng, zonePolygonCoords);
         zoneStatus = inside ? 'En zona' : 'Fuera de zona';
+
+        // Solo al cruzar de fuera a dentro (o al abrir ya estando dentro).
+        if (inside && wasInside !== true) {
+          playZoneEnter();
+        }
+        wasInside = inside;
 
         if (userMarker) {
           userMarker.setLatLng([lat, lng]);
@@ -405,9 +418,6 @@ async function pollRadioEvents() {
 {/if}
 {#if nearbyStatus}
   <p style="color: purple; font-size: 0.9em;">{nearbyStatus}</p>
-{/if}
-{#if encounterStatus}
-  <p style="color: red; font-weight: bold; font-size: 1.1em;">{encounterStatus}</p>
 {/if}
 
 <div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
