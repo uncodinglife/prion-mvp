@@ -136,6 +136,41 @@ AS $$
 $$;
 
 -- =====================================================================
+-- RADAR: jugadores cercanos. La lógica va en una función SECURITY DEFINER
+-- que SOLO devuelve columnas seguras (sin nombre real, edad ni género), y la
+-- vista nearby_players la envuelve en SECURITY INVOKER (no expone la tabla
+-- players ni filtra PII). El cliente sigue consultando la vista igual.
+-- =====================================================================
+CREATE OR REPLACE FUNCTION public.get_nearby_players()
+RETURNS TABLE (
+  id uuid, nick text, role text,
+  lat double precision, lng double precision,
+  status text, distance_meters double precision
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+  SELECT p.id, p.nick, p.role,
+    ST_Y(p.position::geometry) AS lat,
+    ST_X(p.position::geometry) AS lng,
+    p.status,
+    ST_Distance(p.position::geography,
+      (SELECT position FROM players WHERE id = auth.uid())::geography) AS distance_meters
+  FROM players p
+  WHERE p.id <> auth.uid()
+    AND p.status = ANY (ARRAY['active','radar_disabled','neutralized'])
+    AND p.position IS NOT NULL
+    AND p.position_updated_at > (now() - interval '5 minutes')
+    AND ST_DWithin(p.position::geography,
+      (SELECT position FROM players WHERE id = auth.uid())::geography, 25);
+$$;
+
+CREATE OR REPLACE VIEW public.nearby_players
+WITH (security_invoker = true) AS
+  SELECT * FROM public.get_nearby_players();
+
+-- =====================================================================
 -- NARRATIVA: selector de frase al azar
 -- =====================================================================
 CREATE OR REPLACE FUNCTION public.pick_narrative(p_situation TEXT, p_role TEXT DEFAULT NULL)
@@ -737,6 +772,13 @@ GRANT EXECUTE ON FUNCTION public.restore_zombies()                        TO ser
 GRANT EXECUTE ON FUNCTION public.restore_radar()                          TO service_role;
 GRANT EXECUTE ON FUNCTION public.close_game()                             TO service_role;
 GRANT EXECUTE ON FUNCTION public.assign_roles_balanced(INT)               TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_nearby_players()                     TO authenticated;
+GRANT SELECT   ON public.nearby_players                                   TO authenticated;
+
+-- Endurecimiento: el cliente NO debe poder cerrar la partida ni rebarajar roles.
+-- Estas funciones solo las usan los crons (service_role) y Angel desde el editor.
+REVOKE EXECUTE ON FUNCTION public.assign_roles_balanced(INT) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.close_game()               FROM anon, authenticated;
 
 -- =====================================================================
 -- CRONS PROGRAMADOS (pg_cron) — referencia de lo activo
