@@ -70,16 +70,32 @@
 	}
 
 	$effect(() => {
+		// Leer `resolved` aquí (y no solo dentro del if) es lo que hace que este effect
+		// se re-ejecute -y por tanto limpie el interval anterior- en cuanto el encuentro
+		// se resuelve. Antes solo dependía de `encounter.started_at`, que no cambia al
+		// resolver, así que el setInterval seguía corriendo indefinidamente.
+		if (resolved) {
+			if (timerInterval) {
+				clearInterval(timerInterval);
+				timerInterval = null;
+			}
+			return;
+		}
+
 		secondsLeft = computeSecondsLeft();
 		timerInterval = setInterval(() => {
 			secondsLeft = computeSecondsLeft();
 			if (secondsLeft <= 0 && timerInterval) {
 				clearInterval(timerInterval);
+				timerInterval = null;
 			}
 		}, 250);
 
 		return () => {
-			if (timerInterval) clearInterval(timerInterval);
+			if (timerInterval) {
+				clearInterval(timerInterval);
+				timerInterval = null;
+			}
 		};
 	});
 </script>
