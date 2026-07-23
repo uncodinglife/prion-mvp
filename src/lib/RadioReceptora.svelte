@@ -28,9 +28,9 @@
 	});
 </script>
 
-<div class="radio-log">
+<div class="radio">
 	<div class="radio-header">RADIORECEPTORA</div>
-	<div class="radio-log">
+	<div class="radio-log" bind:this={logContainer}>
 		{#if events.length === 0}
 			<p class="radio-empty">Sin transmisiones. Silencio en la frecuencia.</p>
 		{:else}
