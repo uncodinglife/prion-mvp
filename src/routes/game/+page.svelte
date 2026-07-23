@@ -496,17 +496,21 @@
 		</div>
 	</header>
 
-	<p>{positionStatus}</p>
+	<p class="status-text">{positionStatus}</p>
 	{#if zoneStatus}
-		<p style="color: {zoneStatus === 'En zona' ? 'green' : 'red'}; font-weight: bold;">
+		<p
+			class="status-zone"
+			class:zone-ok={zoneStatus === 'En zona'}
+			class:zone-alert={zoneStatus !== 'En zona'}
+		>
 			{zoneStatus}
 		</p>
 	{/if}
 	{#if syncStatus}
-		<p style="color: blue; font-size: 0.9em;">{syncStatus}</p>
+		<p class="status-text status-small">{syncStatus}</p>
 	{/if}
 	{#if nearbyStatus}
-		<p style="color: purple; font-size: 0.9em;">{nearbyStatus}</p>
+		<p class="status-text status-small">{nearbyStatus}</p>
 	{/if}
 
 	<div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
@@ -527,7 +531,7 @@
 		<FinalScreen report={finalReport} />
 	{/if}
 
-	<p><a href="/">Volver</a></p>
+	<p><a class="back-link" href="/">Volver</a></p>
 </div>
 
 <style>
@@ -542,9 +546,10 @@
 		--theme-panel: #0d0f11;
 		--theme-accent: #9ca3af;
 		--theme-text-soft: #cbd5e1;
+		--theme-alert: #facc15;
 
 		background: var(--theme-bg);
-		color: #e8e8e8;
+		color: var(--theme-text-soft);
 		min-height: 100vh;
 		padding: 1rem;
 		box-sizing: border-box;
@@ -556,6 +561,7 @@
 		--theme-panel: #0a1f16;
 		--theme-accent: #4ade80;
 		--theme-text-soft: #bdf5d1;
+		--theme-alert: #fbbf24;
 	}
 
 	.game-root.theme-zombie {
@@ -563,6 +569,7 @@
 		--theme-panel: #1f0a0a;
 		--theme-accent: #f87171;
 		--theme-text-soft: #ffd0d0;
+		--theme-alert: #fde047;
 	}
 
 	.game-header {
@@ -670,5 +677,37 @@
 		.life-number.critical {
 			animation: none;
 		}
+	}
+
+	/* Textos de estado (posición, sync, jugadores cercanos): brillo bajo pero legibles. */
+	.status-text {
+		color: var(--theme-text-soft);
+		opacity: 0.8;
+	}
+
+	.status-small {
+		font-size: 0.9em;
+	}
+
+	.status-zone {
+		font-weight: bold;
+	}
+
+	.status-zone.zone-ok {
+		color: var(--theme-accent);
+	}
+
+	.status-zone.zone-alert {
+		color: var(--theme-alert);
+	}
+
+	.back-link,
+	.back-link:visited {
+		color: var(--theme-accent);
+	}
+
+	.back-link:hover,
+	.back-link:focus-visible {
+		color: var(--theme-alert);
 	}
 </style>
