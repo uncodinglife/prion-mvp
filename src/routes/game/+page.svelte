@@ -42,6 +42,15 @@
 	let headerLife = $state<number>(10);
 	let headerPollInterval: ReturnType<typeof setInterval> | null = null;
 
+	// Desbloqueo de audio: varios tipos de gesto (touchstart es el que exige iOS Safari;
+	// pointerdown/click cubren el resto) para no depender de uno solo. Se desregistran
+	// todos en cuanto el primero dispara.
+	const AUDIO_UNLOCK_EVENTS = ['touchstart', 'pointerdown', 'click'] as const;
+	function unlockAudioOnce() {
+		unlockAudio();
+		AUDIO_UNLOCK_EVENTS.forEach((evt) => window.removeEventListener(evt, unlockAudioOnce));
+	}
+
 	let zonePolygonCoords: [number, number][] = [];
 
 	async function loadZonePolygon(): Promise<[number, number][]> {
@@ -322,12 +331,11 @@
 		L = (await import('leaflet')).default;
 		await import('leaflet/dist/leaflet.css');
 
-		// Desbloquear el audio en el primer toque del usuario (los navegadores lo exigen).
-		const unlock = () => {
-			unlockAudio();
-			window.removeEventListener('pointerdown', unlock);
-		};
-		window.addEventListener('pointerdown', unlock);
+		// Desbloquear el audio en el primer gesto del usuario (los navegadores lo exigen;
+		// en iOS Safari concretamente hace falta un touchstart/click real, no basta pointerdown).
+		AUDIO_UNLOCK_EVENTS.forEach((evt) =>
+			window.addEventListener(evt, unlockAudioOnce, { passive: true })
+		);
 
 		delete (L.Icon.Default.prototype as any)._getIconUrl;
 		L.Icon.Default.mergeOptions({
@@ -453,6 +461,9 @@
 		}
 		if (headerPollInterval !== null) {
 			clearInterval(headerPollInterval);
+		}
+		if (typeof window !== 'undefined') {
+			AUDIO_UNLOCK_EVENTS.forEach((evt) => window.removeEventListener(evt, unlockAudioOnce));
 		}
 		if (map) {
 			map.remove();
