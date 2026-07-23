@@ -22,7 +22,7 @@
 	let lastSentAt = 0;
 	let wasInside: boolean | null = null;
 	let radioEvents = $state<any[]>([]);
-	const SYNC_INTERVAL_MS = 10000;
+	const SYNC_INTERVAL_MS = 3000;
 
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
 	let nearbyMarkers: Map<string, any> = new Map();
@@ -443,7 +443,7 @@
 		radioPollInterval = setInterval(pollRadioEvents, 5000);
 
 		await pollHeaderStatus();
-		headerPollInterval = setInterval(pollHeaderStatus, 5000);
+		headerPollInterval = setInterval(pollHeaderStatus, 3000);
 	});
 
 	onDestroy(() => {
