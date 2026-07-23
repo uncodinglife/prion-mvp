@@ -1,441 +1,674 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { supabase } from '$lib/supabase';
-  import { goto } from '$app/navigation';
-  import CombatOverlay from '$lib/CombatOverlay.svelte';
-  import RadioReceptora from '$lib/RadioReceptora.svelte';
-  import FinalScreen from '$lib/FinalScreen.svelte';
-  import { unlockAudio, playEncounter, playGameEnd, playZoneEnter } from '$lib/sounds';
-
-  let mapContainer: HTMLDivElement;
-  let map: any = null;
-  let userMarker: any = null;
-  let detectionCircle: any = null;
-  let zonePolygon: any = null;
-  let positionStatus = $state<string>('Solicitando permiso de geolocalización...');
-  let zoneStatus = $state<string>('');
-  let syncStatus = $state<string>('');
-  let nearbyStatus = $state<string>('Buscando otros jugadores...');
-  let userPosition = $state<{ lat: number; lng: number } | null>(null);
-  let watchId: number | null = null;
-  let L: any = null;
-  let lastSentAt = 0;
-  let wasInside: boolean | null = null;
-  let radioEvents = $state<any[]>([]);
-  const SYNC_INTERVAL_MS = 10000;
-
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
-  let nearbyMarkers: Map<string, any> = new Map();
-
-  let activeEncounter = $state<any>(null);
-  let resolvedEncounter = $state<any>(null);
-  let resultMessage = $state<string>('');
-  let myRole = $state<string>('');
-  let encounterPollInterval: ReturnType<typeof setInterval> | null = null;
-  let radioPollInterval: ReturnType<typeof setInterval> | null = null;
-
-  let gameEnded = $state<boolean>(false);
-  let finalReport = $state<any>(null);
-
-  let zonePolygonCoords: [number, number][] = [];
-
-  async function loadZonePolygon(): Promise<[number, number][]> {
-    const { data, error } = await supabase.rpc('get_playable_zone');
-    if (error) {
-      console.error('Error cargando polígono de zona:', error);
-      return [];
-    }
-    if (!data || !data.coordinates || !data.coordinates[0]) {
-      return [];
-    }
-    return data.coordinates[0].map((coord: [number, number]) => [coord[1], coord[0]]);
-  }
-
-  function isInsidePolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const [yi, xi] = polygon[i];
-      const [yj, xj] = polygon[j];
-      const intersect = ((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-
-  async function sendPositionToSupabase(lat: number, lng: number) {
-    const now = Date.now();
-    if (now - lastSentAt < SYNC_INTERVAL_MS) {
-      return;
-    }
-    lastSentAt = now;
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const wkt = `POINT(${lng} ${lat})`;
-
-    const { error: updateError } = await supabase
-      .from('players')
-      .update({
-        position: wkt,
-        position_updated_at: new Date().toISOString()
-      })
-      .eq('id', user.id);
-
-    if (updateError) {
-      syncStatus = `Error sincronizando: ${updateError.message}`;
-      console.error('Error update position:', updateError);
-      return;
-    }
-
-    syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
-
-    const { data: detectData, error: detectError } = await supabase.functions.invoke('detect_encounter');
-
-    if (detectError) {
-      console.error('Error detect_encounter:', detectError);
-      return;
-    }
-
-  }
-
-  async function pollNearbyPlayers() {
-    const { data, error } = await supabase
-      .from('nearby_players')
-      .select('*');
-
-    if (error) {
-      console.error('Error consultando nearby_players:', error);
-      nearbyStatus = `Error: ${error.message}`;
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      nearbyStatus = 'No hay jugadores cercanos';
-      nearbyMarkers.forEach((marker) => map.removeLayer(marker));
-      nearbyMarkers.clear();
-      return;
-    }
-
-    nearbyStatus = `${data.length} jugador(es) cercano(s)`;
-
-    const currentIds = new Set<string>();
-
-    for (const player of data) {
-      if (player.lat == null || player.lng == null) continue;
-      currentIds.add(player.id);
-
-      const color = player.role === 'civil' ? '#2d7a2d' : '#a02828';
-      const label = `${player.nick} (${player.role}) - ${Math.round(player.distance_meters)}m`;
-
-      const existingMarker = nearbyMarkers.get(player.id);
-      if (existingMarker) {
-        existingMarker.setLatLng([player.lat, player.lng]);
-        existingMarker.setPopupContent(label);
-      } else {
-        const newMarker = L.circleMarker([player.lat, player.lng], {
-          radius: 8,
-          color: color,
-          fillColor: color,
-          fillOpacity: 0.7,
-          weight: 2
-        }).addTo(map).bindPopup(label);
-        nearbyMarkers.set(player.id, newMarker);
-      }
-    }
-
-    nearbyMarkers.forEach((marker, id) => {
-      if (!currentIds.has(id)) {
-        map.removeLayer(marker);
-        nearbyMarkers.delete(id);
-      }
-    });
-  }
-
-  async function pollActiveEncounter() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    if (activeEncounter && !resolvedEncounter) {
-      const { data: enc } = await supabase
-        .from('encounters')
-        .select('*')
-        .eq('id', activeEncounter.id)
-        .single();
-
-      if (enc && enc.result !== null) {
-        resolvedEncounter = enc;
-        const { data: ev } = await supabase
-          .from('events')
-          .select('message')
-          .eq('related_encounter_id', enc.id)
-          .eq('player_id', user.id)
-          .eq('type', 'encounter_result')
-          .maybeSingle();
-        resultMessage = ev?.message ?? 'Combate resuelto.';
-        return;
-      }
-      return;
-    }
-
-    if (resolvedEncounter) return;
-
-    const { data: player, error: playerError } = await supabase
-      .from('players')
-      .select('role, current_encounter_id')
-      .eq('id', user.id)
-      .single();
-
-    if (playerError || !player) return;
-    myRole = player.role;
-
-    if (!player.current_encounter_id) return;
-
-    const { data: encounter, error: encError } = await supabase
-      .from('encounters')
-      .select('*')
-      .eq('id', player.current_encounter_id)
-      .single();
-
-    if (encError || !encounter) return;
-    if (encounter.result !== null) return;
-
-    activeEncounter = encounter;
-    playEncounter();
-  }
-
-  async function handleCombatDecision(decision: string) {
-    if (!activeEncounter) return;
-
-    const { data, error } = await supabase.functions.invoke('submit_decision', {
-      body: {
-        encounter_id: activeEncounter.id,
-        decision: decision
-      }
-    });
-
-    if (error) {
-      console.error('Error submit_decision:', error);
-      return;
-    }
-
-  }
-
-  function closeCombat() {
-    activeEncounter = null;
-    resolvedEncounter = null;
-    resultMessage = '';
-  }
-
-  async function handleGameEnd(userId: string) {
-    gameEnded = true;
-    playGameEnd();
-
-    // Congelar la pantalla: detener geolocalización y todos los polls.
-    if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-    if (pollInterval !== null) { clearInterval(pollInterval); pollInterval = null; }
-    if (encounterPollInterval !== null) { clearInterval(encounterPollInterval); encounterPollInterval = null; }
-    if (radioPollInterval !== null) { clearInterval(radioPollInterval); radioPollInterval = null; }
-
-    const { data, error } = await supabase.rpc('get_final_report', { p_player_id: userId });
-    if (error) {
-      console.error('Error get_final_report:', error);
-      return;
-    }
-    finalReport = data;
-  }
-async function pollRadioEvents() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('events')
-      .select('id, type, message, created_at')
-      .eq('player_id', user.id)
-      .order('created_at', { ascending: true })
-      .limit(50);
-
-    if (error) {
-      console.error('Error consultando events:', error);
-      return;
-    }
-
-    radioEvents = data ?? [];
-
-    if (!gameEnded && radioEvents.some((e) => e.type === 'game_end')) {
-      await handleGameEnd(user.id);
-    }
-  }
-
-  onMount(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      goto('/login');
-      return;
-    }
-
-    L = (await import('leaflet')).default;
-    await import('leaflet/dist/leaflet.css');
-
-    // Desbloquear el audio en el primer toque del usuario (los navegadores lo exigen).
-    const unlock = () => {
-      unlockAudio();
-      window.removeEventListener('pointerdown', unlock);
-    };
-    window.addEventListener('pointerdown', unlock);
-
-    delete (L.Icon.Default.prototype as any)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-      shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-    });
-
-    map = L.map(mapContainer).setView([41.7811, 3.029], 16);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap',
-      maxZoom: 19
-    }).addTo(map);
-
-    zonePolygonCoords = await loadZonePolygon();
-
-    if (zonePolygonCoords.length === 0) {
-      positionStatus = 'No se pudo cargar la zona de juego.';
-      return;
-    }
-
-    zonePolygon = L.polygon(zonePolygonCoords, {
-      color: '#2d7a2d',
-      fillColor: '#2d7a2d',
-      fillOpacity: 0.15,
-      weight: 2
-    }).addTo(map);
-
-    map.fitBounds(zonePolygon.getBounds());
-
-    if (!('geolocation' in navigator)) {
-      positionStatus = 'Tu navegador no soporta geolocalización.';
-      return;
-    }
-
-    if ('permissions' in navigator) {
-      const permission = await navigator.permissions.query({ name: 'geolocation' });
-      if (permission.state === 'denied') {
-        positionStatus = 'Geolocalización bloqueada. Activa el permiso en la configuración del navegador y recarga.';
-        return;
-      }
-    }
-
-    watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        userPosition = { lat, lng };
-        positionStatus = `Posición: ${lat.toFixed(6)}, ${lng.toFixed(6)} (±${Math.round(pos.coords.accuracy)}m)`;
-
-        const inside = isInsidePolygon(lat, lng, zonePolygonCoords);
-        zoneStatus = inside ? 'En zona' : 'Fuera de zona';
-
-        // Solo al cruzar de fuera a dentro (o al abrir ya estando dentro).
-        if (inside && wasInside !== true) {
-          playZoneEnter();
-        }
-        wasInside = inside;
-
-        if (userMarker) {
-          userMarker.setLatLng([lat, lng]);
-          detectionCircle.setLatLng([lat, lng]);
-        } else {
-          userMarker = L.marker([lat, lng]).addTo(map).bindPopup('Tu posición');
-          detectionCircle = L.circle([lat, lng], {
-            radius: 25,
-            color: '#d24747',
-            fillColor: '#d24747',
-            fillOpacity: 0.1,
-            weight: 1
-          }).addTo(map);
-          map.setView([lat, lng], 17);
-        }
-
-        sendPositionToSupabase(lat, lng);
-      },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          positionStatus = 'Permiso de geolocalización denegado. Actívalo en el navegador y recarga.';
-        } else if (err.code === err.POSITION_UNAVAILABLE) {
-          positionStatus = 'Posición no disponible. Comprueba tu GPS o conexión.';
-        } else if (err.code === err.TIMEOUT) {
-          positionStatus = 'Tiempo agotado intentando obtener posición. Reintenta.';
-        } else {
-          positionStatus = `Error: ${err.message}`;
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 10000
-      }
-    );
-
-    await pollNearbyPlayers();
-    pollInterval = setInterval(pollNearbyPlayers, 5000);
-
-    await pollActiveEncounter();
-    encounterPollInterval = setInterval(pollActiveEncounter, 3000);
-
-    await pollRadioEvents();
-    radioPollInterval = setInterval(pollRadioEvents, 5000);
-  });
-
-  onDestroy(() => {
-    if (watchId !== null) {
-      navigator.geolocation.clearWatch(watchId);
-    }
-    if (pollInterval !== null) {
-      clearInterval(pollInterval);
-    }
-    if (encounterPollInterval !== null) {
-      clearInterval(encounterPollInterval);
-    }
-    if (radioPollInterval !== null) {
-      clearInterval(radioPollInterval);
-    }
-    if (map) {
-      map.remove();
-    }
-  });
+	import { onMount, onDestroy } from 'svelte';
+	import { supabase } from '$lib/supabase';
+	import { goto } from '$app/navigation';
+	import CombatOverlay from '$lib/CombatOverlay.svelte';
+	import RadioReceptora from '$lib/RadioReceptora.svelte';
+	import FinalScreen from '$lib/FinalScreen.svelte';
+	import { unlockAudio, playEncounter, playGameEnd, playZoneEnter } from '$lib/sounds';
+
+	let mapContainer: HTMLDivElement;
+	let map: any = null;
+	let userMarker: any = null;
+	let detectionCircle: any = null;
+	let zonePolygon: any = null;
+	let positionStatus = $state<string>('Solicitando permiso de geolocalización...');
+	let zoneStatus = $state<string>('');
+	let syncStatus = $state<string>('');
+	let nearbyStatus = $state<string>('Buscando otros jugadores...');
+	let userPosition = $state<{ lat: number; lng: number } | null>(null);
+	let watchId: number | null = null;
+	let L: any = null;
+	let lastSentAt = 0;
+	let wasInside: boolean | null = null;
+	let radioEvents = $state<any[]>([]);
+	const SYNC_INTERVAL_MS = 10000;
+
+	let pollInterval: ReturnType<typeof setInterval> | null = null;
+	let nearbyMarkers: Map<string, any> = new Map();
+
+	let activeEncounter = $state<any>(null);
+	let resolvedEncounter = $state<any>(null);
+	let resultMessage = $state<string>('');
+	let myRole = $state<string>('');
+	let encounterPollInterval: ReturnType<typeof setInterval> | null = null;
+	let radioPollInterval: ReturnType<typeof setInterval> | null = null;
+
+	let gameEnded = $state<boolean>(false);
+	let finalReport = $state<any>(null);
+
+	// Estado de cabecera (rol + vida), solo para presentación visual.
+	let headerRole = $state<string>('');
+	let headerLife = $state<number>(10);
+	let headerPollInterval: ReturnType<typeof setInterval> | null = null;
+
+	let zonePolygonCoords: [number, number][] = [];
+
+	async function loadZonePolygon(): Promise<[number, number][]> {
+		const { data, error } = await supabase.rpc('get_playable_zone');
+		if (error) {
+			console.error('Error cargando polígono de zona:', error);
+			return [];
+		}
+		if (!data || !data.coordinates || !data.coordinates[0]) {
+			return [];
+		}
+		return data.coordinates[0].map((coord: [number, number]) => [coord[1], coord[0]]);
+	}
+
+	function isInsidePolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
+		let inside = false;
+		for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+			const [yi, xi] = polygon[i];
+			const [yj, xj] = polygon[j];
+			const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+			if (intersect) inside = !inside;
+		}
+		return inside;
+	}
+
+	async function sendPositionToSupabase(lat: number, lng: number) {
+		const now = Date.now();
+		if (now - lastSentAt < SYNC_INTERVAL_MS) {
+			return;
+		}
+		lastSentAt = now;
+
+		const {
+			data: { user }
+		} = await supabase.auth.getUser();
+		if (!user) return;
+
+		const wkt = `POINT(${lng} ${lat})`;
+
+		const { error: updateError } = await supabase
+			.from('players')
+			.update({
+				position: wkt,
+				position_updated_at: new Date().toISOString()
+			})
+			.eq('id', user.id);
+
+		if (updateError) {
+			syncStatus = `Error sincronizando: ${updateError.message}`;
+			console.error('Error update position:', updateError);
+			return;
+		}
+
+		syncStatus = `Sincronizado a las ${new Date().toLocaleTimeString()}`;
+
+		const { data: detectData, error: detectError } =
+			await supabase.functions.invoke('detect_encounter');
+
+		if (detectError) {
+			console.error('Error detect_encounter:', detectError);
+			return;
+		}
+	}
+
+	async function pollNearbyPlayers() {
+		const { data, error } = await supabase.from('nearby_players').select('*');
+
+		if (error) {
+			console.error('Error consultando nearby_players:', error);
+			nearbyStatus = `Error: ${error.message}`;
+			return;
+		}
+
+		if (!data || data.length === 0) {
+			nearbyStatus = 'No hay jugadores cercanos';
+			nearbyMarkers.forEach((marker) => map.removeLayer(marker));
+			nearbyMarkers.clear();
+			return;
+		}
+
+		nearbyStatus = `${data.length} jugador(es) cercano(s)`;
+
+		const currentIds = new Set<string>();
+
+		for (const player of data) {
+			if (player.lat == null || player.lng == null) continue;
+			currentIds.add(player.id);
+
+			const color = player.role === 'civil' ? '#2d7a2d' : '#a02828';
+			const label = `${player.nick} (${player.role}) - ${Math.round(player.distance_meters)}m`;
+
+			const existingMarker = nearbyMarkers.get(player.id);
+			if (existingMarker) {
+				existingMarker.setLatLng([player.lat, player.lng]);
+				existingMarker.setPopupContent(label);
+			} else {
+				const newMarker = L.circleMarker([player.lat, player.lng], {
+					radius: 8,
+					color: color,
+					fillColor: color,
+					fillOpacity: 0.7,
+					weight: 2
+				})
+					.addTo(map)
+					.bindPopup(label);
+				nearbyMarkers.set(player.id, newMarker);
+			}
+		}
+
+		nearbyMarkers.forEach((marker, id) => {
+			if (!currentIds.has(id)) {
+				map.removeLayer(marker);
+				nearbyMarkers.delete(id);
+			}
+		});
+	}
+
+	async function pollActiveEncounter() {
+		const {
+			data: { user }
+		} = await supabase.auth.getUser();
+		if (!user) return;
+
+		if (activeEncounter && !resolvedEncounter) {
+			const { data: enc } = await supabase
+				.from('encounters')
+				.select('*')
+				.eq('id', activeEncounter.id)
+				.single();
+
+			if (enc && enc.result !== null) {
+				resolvedEncounter = enc;
+				const { data: ev } = await supabase
+					.from('events')
+					.select('message')
+					.eq('related_encounter_id', enc.id)
+					.eq('player_id', user.id)
+					.eq('type', 'encounter_result')
+					.maybeSingle();
+				resultMessage = ev?.message ?? 'Combate resuelto.';
+				return;
+			}
+			return;
+		}
+
+		if (resolvedEncounter) return;
+
+		const { data: player, error: playerError } = await supabase
+			.from('players')
+			.select('role, current_encounter_id')
+			.eq('id', user.id)
+			.single();
+
+		if (playerError || !player) return;
+		myRole = player.role;
+
+		if (!player.current_encounter_id) return;
+
+		const { data: encounter, error: encError } = await supabase
+			.from('encounters')
+			.select('*')
+			.eq('id', player.current_encounter_id)
+			.single();
+
+		if (encError || !encounter) return;
+		if (encounter.result !== null) return;
+
+		activeEncounter = encounter;
+		playEncounter();
+	}
+
+	async function handleCombatDecision(decision: string) {
+		if (!activeEncounter) return;
+
+		const { data, error } = await supabase.functions.invoke('submit_decision', {
+			body: {
+				encounter_id: activeEncounter.id,
+				decision: decision
+			}
+		});
+
+		if (error) {
+			console.error('Error submit_decision:', error);
+			return;
+		}
+	}
+
+	function closeCombat() {
+		activeEncounter = null;
+		resolvedEncounter = null;
+		resultMessage = '';
+	}
+
+	async function handleGameEnd(userId: string) {
+		gameEnded = true;
+		playGameEnd();
+
+		// Congelar la pantalla: detener geolocalización y todos los polls.
+		if (watchId !== null) {
+			navigator.geolocation.clearWatch(watchId);
+			watchId = null;
+		}
+		if (pollInterval !== null) {
+			clearInterval(pollInterval);
+			pollInterval = null;
+		}
+		if (encounterPollInterval !== null) {
+			clearInterval(encounterPollInterval);
+			encounterPollInterval = null;
+		}
+		if (radioPollInterval !== null) {
+			clearInterval(radioPollInterval);
+			radioPollInterval = null;
+		}
+
+		const { data, error } = await supabase.rpc('get_final_report', { p_player_id: userId });
+		if (error) {
+			console.error('Error get_final_report:', error);
+			return;
+		}
+		finalReport = data;
+	}
+	async function pollRadioEvents() {
+		const {
+			data: { user }
+		} = await supabase.auth.getUser();
+		if (!user) return;
+
+		const { data, error } = await supabase
+			.from('events')
+			.select('id, type, message, created_at')
+			.eq('player_id', user.id)
+			.order('created_at', { ascending: true })
+			.limit(50);
+
+		if (error) {
+			console.error('Error consultando events:', error);
+			return;
+		}
+
+		radioEvents = data ?? [];
+
+		if (!gameEnded && radioEvents.some((e) => e.type === 'game_end')) {
+			await handleGameEnd(user.id);
+		}
+	}
+
+	// Lee el rol y la vida actuales para pintar la cabecera; solo lectura, no toca lógica de juego.
+	async function pollHeaderStatus() {
+		const {
+			data: { user }
+		} = await supabase.auth.getUser();
+		if (!user) return;
+
+		const { data: player, error } = await supabase
+			.from('players')
+			.select('role, life')
+			.eq('id', user.id)
+			.single();
+
+		if (error || !player) return;
+
+		headerRole = player.role;
+		if (typeof player.life === 'number') {
+			headerLife = player.life;
+		}
+	}
+
+	onMount(async () => {
+		const {
+			data: { user }
+		} = await supabase.auth.getUser();
+		if (!user) {
+			goto('/login');
+			return;
+		}
+
+		L = (await import('leaflet')).default;
+		await import('leaflet/dist/leaflet.css');
+
+		// Desbloquear el audio en el primer toque del usuario (los navegadores lo exigen).
+		const unlock = () => {
+			unlockAudio();
+			window.removeEventListener('pointerdown', unlock);
+		};
+		window.addEventListener('pointerdown', unlock);
+
+		delete (L.Icon.Default.prototype as any)._getIconUrl;
+		L.Icon.Default.mergeOptions({
+			iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+			iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+			shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+		});
+
+		map = L.map(mapContainer).setView([41.7811, 3.029], 16);
+
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+			attribution: '© OpenStreetMap',
+			maxZoom: 19
+		}).addTo(map);
+
+		zonePolygonCoords = await loadZonePolygon();
+
+		if (zonePolygonCoords.length === 0) {
+			positionStatus = 'No se pudo cargar la zona de juego.';
+			return;
+		}
+
+		zonePolygon = L.polygon(zonePolygonCoords, {
+			color: '#2d7a2d',
+			fillColor: '#2d7a2d',
+			fillOpacity: 0.15,
+			weight: 2
+		}).addTo(map);
+
+		map.fitBounds(zonePolygon.getBounds());
+
+		if (!('geolocation' in navigator)) {
+			positionStatus = 'Tu navegador no soporta geolocalización.';
+			return;
+		}
+
+		if ('permissions' in navigator) {
+			const permission = await navigator.permissions.query({ name: 'geolocation' });
+			if (permission.state === 'denied') {
+				positionStatus =
+					'Geolocalización bloqueada. Activa el permiso en la configuración del navegador y recarga.';
+				return;
+			}
+		}
+
+		watchId = navigator.geolocation.watchPosition(
+			(pos) => {
+				const lat = pos.coords.latitude;
+				const lng = pos.coords.longitude;
+				userPosition = { lat, lng };
+				positionStatus = `Posición: ${lat.toFixed(6)}, ${lng.toFixed(6)} (±${Math.round(pos.coords.accuracy)}m)`;
+
+				const inside = isInsidePolygon(lat, lng, zonePolygonCoords);
+				zoneStatus = inside ? 'En zona' : 'Fuera de zona';
+
+				// Solo al cruzar de fuera a dentro (o al abrir ya estando dentro).
+				if (inside && wasInside !== true) {
+					playZoneEnter();
+				}
+				wasInside = inside;
+
+				if (userMarker) {
+					userMarker.setLatLng([lat, lng]);
+					detectionCircle.setLatLng([lat, lng]);
+				} else {
+					userMarker = L.marker([lat, lng]).addTo(map).bindPopup('Tu posición');
+					detectionCircle = L.circle([lat, lng], {
+						radius: 25,
+						color: '#d24747',
+						fillColor: '#d24747',
+						fillOpacity: 0.1,
+						weight: 1
+					}).addTo(map);
+					map.setView([lat, lng], 17);
+				}
+
+				sendPositionToSupabase(lat, lng);
+			},
+			(err) => {
+				if (err.code === err.PERMISSION_DENIED) {
+					positionStatus =
+						'Permiso de geolocalización denegado. Actívalo en el navegador y recarga.';
+				} else if (err.code === err.POSITION_UNAVAILABLE) {
+					positionStatus = 'Posición no disponible. Comprueba tu GPS o conexión.';
+				} else if (err.code === err.TIMEOUT) {
+					positionStatus = 'Tiempo agotado intentando obtener posición. Reintenta.';
+				} else {
+					positionStatus = `Error: ${err.message}`;
+				}
+			},
+			{
+				enableHighAccuracy: true,
+				maximumAge: 5000,
+				timeout: 10000
+			}
+		);
+
+		await pollNearbyPlayers();
+		pollInterval = setInterval(pollNearbyPlayers, 5000);
+
+		await pollActiveEncounter();
+		encounterPollInterval = setInterval(pollActiveEncounter, 3000);
+
+		await pollRadioEvents();
+		radioPollInterval = setInterval(pollRadioEvents, 5000);
+
+		await pollHeaderStatus();
+		headerPollInterval = setInterval(pollHeaderStatus, 5000);
+	});
+
+	onDestroy(() => {
+		if (watchId !== null) {
+			navigator.geolocation.clearWatch(watchId);
+		}
+		if (pollInterval !== null) {
+			clearInterval(pollInterval);
+		}
+		if (encounterPollInterval !== null) {
+			clearInterval(encounterPollInterval);
+		}
+		if (radioPollInterval !== null) {
+			clearInterval(radioPollInterval);
+		}
+		if (headerPollInterval !== null) {
+			clearInterval(headerPollInterval);
+		}
+		if (map) {
+			map.remove();
+		}
+	});
 </script>
 
-<h1>Zona Prion</h1>
+<div
+	class="game-root"
+	class:theme-civil={headerRole === 'civil'}
+	class:theme-zombie={headerRole === 'zombie'}
+>
+	<header class="game-header">
+		<h1>Zona Prion</h1>
 
-<p>{positionStatus}</p>
-{#if zoneStatus}
-  <p style="color: {zoneStatus === 'En zona' ? 'green' : 'red'}; font-weight: bold;">{zoneStatus}</p>
-{/if}
-{#if syncStatus}
-  <p style="color: blue; font-size: 0.9em;">{syncStatus}</p>
-{/if}
-{#if nearbyStatus}
-  <p style="color: purple; font-size: 0.9em;">{nearbyStatus}</p>
-{/if}
+		<div class="header-status">
+			{#if headerRole === 'civil'}
+				<div class="role-badge">
+					<span class="role-icon" aria-hidden="true">🛡️</span>
+					<span class="role-label">CIVIL</span>
+				</div>
+			{:else if headerRole === 'zombie'}
+				<div class="role-badge">
+					<span class="role-icon" aria-hidden="true">🧟</span>
+					<span class="role-label">ZOMBIE</span>
+				</div>
+			{:else}
+				<div class="role-badge role-badge-pending">
+					<span class="role-label">CARGANDO ROL…</span>
+				</div>
+			{/if}
 
-<div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
-<RadioReceptora events={radioEvents} />
+			<div class="life-track" aria-label={`Vida: ${headerLife} de 10`}>
+				<div class="life-segments" class:critical={headerLife <= 3}>
+					{#each Array(10) as _, i (i)}
+						<span class="segment" class:filled={i < headerLife}></span>
+					{/each}
+				</div>
+				<span class="life-number" class:critical={headerLife <= 3}>{headerLife} / 10</span>
+			</div>
+		</div>
+	</header>
 
-{#if activeEncounter}
-  <CombatOverlay
-    encounter={activeEncounter}
-    myRole={myRole}
-    resolved={resolvedEncounter}
-    resultMessage={resultMessage}
-    onDecision={handleCombatDecision}
-    onClose={closeCombat}
-  />
-{/if}
+	<p>{positionStatus}</p>
+	{#if zoneStatus}
+		<p style="color: {zoneStatus === 'En zona' ? 'green' : 'red'}; font-weight: bold;">
+			{zoneStatus}
+		</p>
+	{/if}
+	{#if syncStatus}
+		<p style="color: blue; font-size: 0.9em;">{syncStatus}</p>
+	{/if}
+	{#if nearbyStatus}
+		<p style="color: purple; font-size: 0.9em;">{nearbyStatus}</p>
+	{/if}
 
-{#if gameEnded && finalReport}
-  <FinalScreen report={finalReport} />
-{/if}
+	<div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
+	<RadioReceptora events={radioEvents} />
 
-<p><a href="/">Volver</a></p>
+	{#if activeEncounter}
+		<CombatOverlay
+			encounter={activeEncounter}
+			{myRole}
+			resolved={resolvedEncounter}
+			{resultMessage}
+			onDecision={handleCombatDecision}
+			onClose={closeCombat}
+		/>
+	{/if}
+
+	{#if gameEnded && finalReport}
+		<FinalScreen report={finalReport} />
+	{/if}
+
+	<p><a href="/">Volver</a></p>
+</div>
+
+<style>
+	/*
+   * Tema por bando: variables CSS definidas aquí y consumidas también por
+   * componentes hijos (p. ej. RadioReceptora) vía herencia de custom properties,
+   * que atraviesa los límites de scoped-style de Svelte. Cambiar el bando solo
+   * requiere tocar estos bloques .theme-*, nunca los colores en el resto del CSS.
+   */
+	.game-root {
+		--theme-bg: #14171a;
+		--theme-panel: #0d0f11;
+		--theme-accent: #9ca3af;
+		--theme-text-soft: #cbd5e1;
+
+		background: var(--theme-bg);
+		color: #e8e8e8;
+		min-height: 100vh;
+		padding: 1rem;
+		box-sizing: border-box;
+		transition: background-color 0.4s ease;
+	}
+
+	.game-root.theme-civil {
+		--theme-bg: #0f3d2e;
+		--theme-panel: #0a1f16;
+		--theme-accent: #4ade80;
+		--theme-text-soft: #bdf5d1;
+	}
+
+	.game-root.theme-zombie {
+		--theme-bg: #3d0f0f;
+		--theme-panel: #1f0a0a;
+		--theme-accent: #f87171;
+		--theme-text-soft: #ffd0d0;
+	}
+
+	.game-header {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+	}
+
+	.game-header h1 {
+		color: var(--theme-text-soft);
+		margin: 0;
+	}
+
+	.header-status {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 1rem;
+		background: var(--theme-panel);
+		border: 1px solid var(--theme-accent);
+		border-radius: 8px;
+		padding: 0.6rem 0.9rem;
+	}
+
+	.role-badge {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-family: monospace;
+	}
+
+	.role-icon {
+		font-size: 1.5rem;
+		line-height: 1;
+	}
+
+	.role-label {
+		font-size: 1.1rem;
+		font-weight: bold;
+		letter-spacing: 0.1em;
+		color: var(--theme-accent);
+	}
+
+	.role-badge-pending .role-label {
+		font-size: 0.85rem;
+		color: var(--theme-text-soft);
+		font-weight: normal;
+		letter-spacing: normal;
+	}
+
+	.life-track {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.life-segments {
+		display: flex;
+		gap: 3px;
+	}
+
+	.segment {
+		width: 16px;
+		height: 14px;
+		border-radius: 2px;
+		background: transparent;
+		border: 1px solid var(--theme-accent);
+		opacity: 0.4;
+	}
+
+	.segment.filled {
+		background: var(--theme-accent);
+		opacity: 1;
+	}
+
+	.life-segments.critical .segment.filled {
+		animation: life-pulse 1s ease-in-out infinite;
+	}
+
+	.life-number {
+		font-family: monospace;
+		font-size: 0.9rem;
+		color: var(--theme-text-soft);
+	}
+
+	.life-number.critical {
+		animation: life-pulse 1s ease-in-out infinite;
+		color: var(--theme-accent);
+		font-weight: bold;
+	}
+
+	@keyframes life-pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.35;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.life-segments.critical .segment.filled,
+		.life-number.critical {
+			animation: none;
+		}
+	}
+</style>
