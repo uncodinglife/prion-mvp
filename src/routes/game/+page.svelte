@@ -40,6 +40,7 @@
 	// Estado de cabecera (rol + vida), solo para presentación visual.
 	let headerRole = $state<string>('');
 	let headerLife = $state<number>(10);
+	let headerNick = $state<string>('');
 	let headerPollInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Desbloqueo de audio: varios tipos de gesto (touchstart es el que exige iOS Safari;
@@ -307,7 +308,7 @@
 
 		const { data: player, error } = await supabase
 			.from('players')
-			.select('role, life')
+			.select('role, life, nick')
 			.eq('id', user.id)
 			.single();
 
@@ -316,6 +317,9 @@
 		headerRole = player.role;
 		if (typeof player.life === 'number') {
 			headerLife = player.life;
+		}
+		if (typeof player.nick === 'string') {
+			headerNick = player.nick;
 		}
 	}
 
@@ -496,6 +500,10 @@
 				</div>
 			{/if}
 
+			{#if headerNick}
+				<span class="nick-tag">{headerNick}</span>
+			{/if}
+
 			<div class="life-track" aria-label={`Vida: ${headerLife} de 10`}>
 				<div class="life-segments" class:critical={headerLife <= 3}>
 					{#each Array(10) as _, i (i)}
@@ -630,6 +638,16 @@
 		color: var(--theme-text-soft);
 		font-weight: normal;
 		letter-spacing: normal;
+	}
+
+	.nick-tag {
+		font-family: monospace;
+		font-size: 0.85rem;
+		color: var(--theme-text-soft);
+		opacity: 0.75;
+		border: 1px solid var(--theme-accent);
+		border-radius: 4px;
+		padding: 0.15rem 0.5rem;
 	}
 
 	.life-track {

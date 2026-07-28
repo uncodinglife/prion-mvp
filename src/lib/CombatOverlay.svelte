@@ -19,6 +19,15 @@
 
 	// Aviso sensorial al montar: solo dispara una vez, cuando aparece un encuentro nuevo
 	// (el componente no se remonta al pasar a la pantalla de resultado, solo cambia `resolved`).
+	// Nota: a diferencia del audio (unlockAudio en +page.svelte), vibrate() no admite un
+	// "desbloqueo" previo con un gesto temprano: el navegador exige activación de usuario
+	// transitoria en el momento exacto de la llamada, no un estado persistente que se pueda
+	// activar una vez (como sí hace AudioContext.resume()). Como este onMount se dispara desde
+	// un poll en background y no desde un tap, Android puede descartar la vibración en
+	// silencio si no hay un gesto reciente por casualidad. Es una limitación conocida de la
+	// Vibration API, no un bug: la única forma fiable de evitarla sería disparar vibrate()
+	// dentro de un gesto del jugador (p.ej. el primer tap en el overlay), a costa de perder el
+	// aviso inmediato al aparecer el encuentro.
 	onMount(() => {
 		if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
 			navigator.vibrate([200, 100, 200, 100, 400]);
