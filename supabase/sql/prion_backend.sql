@@ -291,6 +291,14 @@ BEGIN
   v_civil_msg  := COALESCE(public.pick_narrative(v_situation, 'civil'),  'El encuentro se resuelve.');
   v_zombie_msg := COALESCE(public.pick_narrative(v_situation, 'zombie'), 'El encuentro se resuelve.');
 
+  -- LUCHAR+MORDER se resuelve por dado, pero solo hubo empate (y re-tirada) si el array
+  -- de tiradas tiene más de un elemento; lo dejamos explícito en el mensaje para que no
+  -- se pierda al releerlo fuera del momento del combate (p.ej. repasando la radio después).
+  IF v_dice IS NOT NULL AND jsonb_array_length(v_rolls) > 1 THEN
+    v_civil_msg  := v_civil_msg  || ' (resuelto a suerte tras empate)';
+    v_zombie_msg := v_zombie_msg || ' (resuelto a suerte tras empate)';
+  END IF;
+
   v_civil_new_life := v_civil.life - v_civil_damage;
   v_zombie_new_life := v_zombie.life - v_zombie_damage;
 
@@ -624,12 +632,12 @@ INSERT INTO public.narrative (situation, role, message) VALUES
 -- FLEE_ESCAPE (HUIR+MORDER) — civil escapa (-1)
 -- ---------------------------------------------------------------------
 INSERT INTO public.narrative (situation, role, message) VALUES
-('flee_escape','civil','La sangre seca del suelo te hace resbalar, pero te impulsas justo cuando esas manos podridas se cierran donde estaba tu cabeza. Vives. (-1)'),
-('flee_escape','civil','Corres sin mirar atrás. Sientes su aliento frío en la nuca y luego, de golpe, nada. Solo tu propio jadeo y la oscuridad. (-1)'),
-('flee_escape','civil','Un tirón en el brazo, tela que se rasga, piel que arde. Te zafas y la noche te traga antes que a él. Escapaste. (-1)'),
-('flee_escape','civil','Tus piernas deciden por ti. Vuelas entre las sombras mientras detrás queda un gruñido de rabia que no te alcanzó. (-1)'),
-('flee_escape','civil','Sientes los dedos rozarte la espalda, hambrientos, casi. Casi. Te hundes en lo oscuro y los pierdes. (-1)'),
-('flee_escape','civil','El corazón te revienta en la garganta, pero los pies responden. Lo dejas atrás arañando el aire donde estabas. (-1)');
+('flee_escape','civil','La sangre seca del suelo te hace resbalar, pero te impulsas justo cuando esas manos podridas se cierran donde estaba tu cabeza. Vives. (civil -1)'),
+('flee_escape','civil','Corres sin mirar atrás. Sientes su aliento frío en la nuca y luego, de golpe, nada. Solo tu propio jadeo y la oscuridad. (civil -1)'),
+('flee_escape','civil','Un tirón en el brazo, tela que se rasga, piel que arde. Te zafas y la noche te traga antes que a él. Escapaste. (civil -1)'),
+('flee_escape','civil','Tus piernas deciden por ti. Vuelas entre las sombras mientras detrás queda un gruñido de rabia que no te alcanzó. (civil -1)'),
+('flee_escape','civil','Sientes los dedos rozarte la espalda, hambrientos, casi. Casi. Te hundes en lo oscuro y los pierdes. (civil -1)'),
+('flee_escape','civil','El corazón te revienta en la garganta, pero los pies responden. Lo dejas atrás arañando el aire donde estabas. (civil -1)');
 
 INSERT INTO public.narrative (situation, role, message) VALUES
 ('flee_escape','zombie','Cierras la mandíbula y solo muerdes aire frío. El calor de la presa se escurre entre tus dedos.'),
@@ -643,12 +651,12 @@ INSERT INTO public.narrative (situation, role, message) VALUES
 -- FLEE_CAUGHT (HUIR+PERSEGUIR) — civil cazado al huir (-2)
 -- ---------------------------------------------------------------------
 INSERT INTO public.narrative (situation, role, message) VALUES
-('flee_caught','civil','Corres, pero él corre dentro de ti, en tus pesadillas, más rápido. Te alcanza antes de la esquina y algo se rompe. (-2)'),
-('flee_caught','civil','Crees que escapas hasta que un peso frío se te echa encima y unos dientes encuentran carne. Te arrancas y sigues, sangrando. (-2)'),
-('flee_caught','civil','La huida dura tres pasos. Al cuarto, sus manos. Al quinto, el dolor. Logras soltarte, pero te has dejado un trozo atrás. (-2)'),
-('flee_caught','civil','No mira dónde pisa, no le importa caer: solo quiere tu carne. Te embiste y te marca antes de que te zafes. (-2)'),
-('flee_caught','civil','Sientes cómo la distancia se cierra, metro a metro, como una trampa que se traga su propia cuerda. Cuando llega, llega entero. (-2)'),
-('flee_caught','civil','Pensabas que eras rápido. Él no se cansa, no duda, no teme. Te cae encima y te muerde el avance. (-2)');
+('flee_caught','civil','Corres, pero él corre dentro de ti, en tus pesadillas, más rápido. Te alcanza antes de la esquina y algo se rompe. (civil -2)'),
+('flee_caught','civil','Crees que escapas hasta que un peso frío se te echa encima y unos dientes encuentran carne. Te arrancas y sigues, sangrando. (civil -2)'),
+('flee_caught','civil','La huida dura tres pasos. Al cuarto, sus manos. Al quinto, el dolor. Logras soltarte, pero te has dejado un trozo atrás. (civil -2)'),
+('flee_caught','civil','No mira dónde pisa, no le importa caer: solo quiere tu carne. Te embiste y te marca antes de que te zafes. (civil -2)'),
+('flee_caught','civil','Sientes cómo la distancia se cierra, metro a metro, como una trampa que se traga su propia cuerda. Cuando llega, llega entero. (civil -2)'),
+('flee_caught','civil','Pensabas que eras rápido. Él no se cansa, no duda, no teme. Te cae encima y te muerde el avance. (civil -2)');
 
 INSERT INTO public.narrative (situation, role, message) VALUES
 ('flee_caught','zombie','No corres: cazas. La distancia se rinde ante ti y tus manos encuentran por fin la carne tibia que late. (civil -2)'),
@@ -670,12 +678,12 @@ INSERT INTO public.narrative (situation, role, message) VALUES
 ('fight_surprise','civil','No huyes. Te plantas. Y cuando esa cosa se abalanza, encuentra unas manos vivas que todavía saben pelear. Lo hieres y retrocede. (zombie -3)');
 
 INSERT INTO public.narrative (situation, role, message) VALUES
-('fight_surprise','zombie','Te lanzas seguro de la carne fácil y te recibe un golpe que no estaba en tus cálculos. El dolor te arranca el hambre por un segundo. (-3)'),
-('fight_surprise','zombie','La presa no corre: se queda. Demasiado tarde entiendes por qué. Su golpe te dobla y retrocedes, herido. (-3)'),
-('fight_surprise','zombie','Cargas a ciegas, sin miedo, sin pensar. Por eso no ves venir el impacto que te abre y te echa atrás. (-3)'),
-('fight_surprise','zombie','Creías tener la cena servida. La cena te ha partido algo por dentro. Te repliegas a las sombras, goteando. (-3)'),
-('fight_surprise','zombie','Vas entero a por él y él va entero a por ti. Pierdes. Algo cede dentro de ti con un crujido húmedo. (-3)'),
-('fight_surprise','zombie','El vivo todavía tiene fuego. Lo descubres tarde, cuando su golpe te recuerda lo que es el dolor. (-3)');
+('fight_surprise','zombie','Te lanzas seguro de la carne fácil y te recibe un golpe que no estaba en tus cálculos. El dolor te arranca el hambre por un segundo. (zombie -3)'),
+('fight_surprise','zombie','La presa no corre: se queda. Demasiado tarde entiendes por qué. Su golpe te dobla y retrocedes, herido. (zombie -3)'),
+('fight_surprise','zombie','Cargas a ciegas, sin miedo, sin pensar. Por eso no ves venir el impacto que te abre y te echa atrás. (zombie -3)'),
+('fight_surprise','zombie','Creías tener la cena servida. La cena te ha partido algo por dentro. Te repliegas a las sombras, goteando. (zombie -3)'),
+('fight_surprise','zombie','Vas entero a por él y él va entero a por ti. Pierdes. Algo cede dentro de ti con un crujido húmedo. (zombie -3)'),
+('fight_surprise','zombie','El vivo todavía tiene fuego. Lo descubres tarde, cuando su golpe te recuerda lo que es el dolor. (zombie -3)');
 
 -- ---------------------------------------------------------------------
 -- FIGHT_CLASH_CIVILWIN (LUCHAR+MORDER, dado lo gana el civil) — zombie -4
@@ -689,23 +697,23 @@ INSERT INTO public.narrative (situation, role, message) VALUES
 ('fight_clash_civilwin','civil','Choque salvaje en la oscuridad. Por un instante eterno no hay ganador. Luego lo hay, y eres tú. (zombie -4)');
 
 INSERT INTO public.narrative (situation, role, message) VALUES
-('fight_clash_civilwin','zombie','Os trabáis cuerpo a cuerpo, frío contra fiebre, y por una vez la fiebre vence. Algo se parte dentro de ti y el suelo sube a recibirte. (-4)'),
-('fight_clash_civilwin','zombie','Tenías la carne entre las manos. Tenías. El vivo pelea como solo pelea quien no quiere morir, y te destroza. (-4)'),
-('fight_clash_civilwin','zombie','Forcejeo a vida o muerte, y descubres que todavía puedes perder. Su golpe final te apaga medio cuerpo. (-4)'),
-('fight_clash_civilwin','zombie','La presa se defiende con una furia que no entiendes, que ya olvidaste. Te quiebra y caes hacia la sombra. (-4)'),
-('fight_clash_civilwin','zombie','Ibas a devorar y te devuelven el hambre multiplicada en dolor. Algo crujió. Era tuyo. (-4)'),
-('fight_clash_civilwin','zombie','El choque os funde un instante en una sola masa de violencia. Cuando se separa, tú eres el que sangra negro. (-4)');
+('fight_clash_civilwin','zombie','Os trabáis cuerpo a cuerpo, frío contra fiebre, y por una vez la fiebre vence. Algo se parte dentro de ti y el suelo sube a recibirte. (zombie -4)'),
+('fight_clash_civilwin','zombie','Tenías la carne entre las manos. Tenías. El vivo pelea como solo pelea quien no quiere morir, y te destroza. (zombie -4)'),
+('fight_clash_civilwin','zombie','Forcejeo a vida o muerte, y descubres que todavía puedes perder. Su golpe final te apaga medio cuerpo. (zombie -4)'),
+('fight_clash_civilwin','zombie','La presa se defiende con una furia que no entiendes, que ya olvidaste. Te quiebra y caes hacia la sombra. (zombie -4)'),
+('fight_clash_civilwin','zombie','Ibas a devorar y te devuelven el hambre multiplicada en dolor. Algo crujió. Era tuyo. (zombie -4)'),
+('fight_clash_civilwin','zombie','El choque os funde un instante en una sola masa de violencia. Cuando se separa, tú eres el que sangra negro. (zombie -4)');
 
 -- ---------------------------------------------------------------------
 -- FIGHT_CLASH_ZOMBIEWIN (LUCHAR+MORDER, dado lo gana el zombie) — civil -4
 -- ---------------------------------------------------------------------
 INSERT INTO public.narrative (situation, role, message) VALUES
-('fight_clash_zombiewin','civil','Os trabáis en la oscuridad y descubres, demasiado tarde, que la fuerza muerta no se cansa. Sus dientes encuentran su sitio. Algo tuyo se apaga. (-4)'),
-('fight_clash_zombiewin','civil','Peleas con todo lo que eres, y no basta. El frío te gana terreno, centímetro a centímetro, hasta morderte hondo. (-4)'),
-('fight_clash_zombiewin','civil','Cuerpo a cuerpo, y por un momento crees que ganas. Luego sientes el desgarro y entiendes que no. (-4)'),
-('fight_clash_zombiewin','civil','Su hambre es más antigua que tu miedo. Te vence en el forcejeo y te arranca un pedazo de vida. (-4)'),
-('fight_clash_zombiewin','civil','Das todo lo que tienes contra algo que ya no siente nada. Pierdes. El dolor te dobla y la sangre te empapa. (-4)'),
-('fight_clash_zombiewin','civil','El choque te enseña la peor lección: que querer vivir, a veces, no alcanza. Caes herido, muy herido. (-4)');
+('fight_clash_zombiewin','civil','Os trabáis en la oscuridad y descubres, demasiado tarde, que la fuerza muerta no se cansa. Sus dientes encuentran su sitio. Algo tuyo se apaga. (civil -4)'),
+('fight_clash_zombiewin','civil','Peleas con todo lo que eres, y no basta. El frío te gana terreno, centímetro a centímetro, hasta morderte hondo. (civil -4)'),
+('fight_clash_zombiewin','civil','Cuerpo a cuerpo, y por un momento crees que ganas. Luego sientes el desgarro y entiendes que no. (civil -4)'),
+('fight_clash_zombiewin','civil','Su hambre es más antigua que tu miedo. Te vence en el forcejeo y te arranca un pedazo de vida. (civil -4)'),
+('fight_clash_zombiewin','civil','Das todo lo que tienes contra algo que ya no siente nada. Pierdes. El dolor te dobla y la sangre te empapa. (civil -4)'),
+('fight_clash_zombiewin','civil','El choque te enseña la peor lección: que querer vivir, a veces, no alcanza. Caes herido, muy herido. (civil -4)');
 
 INSERT INTO public.narrative (situation, role, message) VALUES
 ('fight_clash_zombiewin','zombie','Os fundís en un solo nudo de violencia y, esta vez, el hambre puede más. Hincas los dientes donde late la vida y bebes. (civil -4)'),
