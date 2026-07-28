@@ -51,10 +51,10 @@ function tone(
 
 /** Alerta de encuentro: dos pulsos agudos y secos. Tensión inmediata. */
 /** Alerta de encuentro: bajo pulsante grave que aprieta. Tensión tipo Alien. */
-export function playEncounter(): void {
+export async function playEncounter(): Promise<void> {
   const c = getCtx();
   if (!c) return;
-  if (c.state === 'suspended') c.resume();
+  if (c.state === 'suspended') await c.resume();
   const pulses = 6;
   const step = 0.26; // separación entre latidos
   for (let i = 0; i < pulses; i++) {
@@ -64,20 +64,20 @@ export function playEncounter(): void {
 }
 
 /** Fin de partida: descenso grave, una sirena que se apaga. */
-export function playGameEnd(): void {
+export async function playGameEnd(): Promise<void> {
   const c = getCtx();
   if (!c) return;
-  if (c.state === 'suspended') c.resume();
+  if (c.state === 'suspended') await c.resume();
   tone(440, 0, 0.5, 'sawtooth', 0.2);
   tone(330, 0.45, 0.6, 'sawtooth', 0.2);
   tone(220, 0.95, 0.9, 'sawtooth', 0.22);
 }
 
 /** Entrada en zona: dos notas graves ascendentes. Territorio caliente. */
-export function playZoneEnter(): void {
+export async function playZoneEnter(): Promise<void> {
   const c = getCtx();
   if (!c) return;
-  if (c.state === 'suspended') c.resume();
+  if (c.state === 'suspended') await c.resume();
   tone(196, 0, 0.35, 'triangle', 0.2);
   tone(294, 0.3, 0.5, 'triangle', 0.2);
 }
