@@ -44,12 +44,14 @@
 	let headerPollInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Desbloqueo de audio: varios tipos de gesto (touchstart es el que exige iOS Safari;
-	// pointerdown/click cubren el resto) para no depender de uno solo. Se desregistran
-	// todos en cuanto el primero dispara.
+	// pointerdown/click cubren el resto) para no depender de uno solo. Se mantienen activos
+	// toda la sesión (no se desregistran tras el primer disparo): Safari puede suspender el
+	// AudioContext por su cuenta más adelante (pérdida de foco, bloqueo de pantalla), y solo
+	// un gesto real del jugador puede reanudarlo, así que hace falta poder reintentarlo en
+	// cada gesto posterior, no solo en el primero.
 	const AUDIO_UNLOCK_EVENTS = ['touchstart', 'pointerdown', 'click'] as const;
-	function unlockAudioOnce() {
+	function unlockAudioOnGesture() {
 		unlockAudio();
-		AUDIO_UNLOCK_EVENTS.forEach((evt) => window.removeEventListener(evt, unlockAudioOnce));
 	}
 
 	let zonePolygonCoords: [number, number][] = [];
@@ -220,7 +222,7 @@
 		if (encounter.result !== null) return;
 
 		activeEncounter = encounter;
-		playEncounter();
+		await playEncounter();
 	}
 
 	async function handleCombatDecision(decision: string) {
@@ -247,7 +249,7 @@
 
 	async function handleGameEnd(userId: string) {
 		gameEnded = true;
-		playGameEnd();
+		await playGameEnd();
 
 		// Congelar la pantalla: detener geolocalización y todos los polls.
 		if (watchId !== null) {
@@ -338,7 +340,7 @@
 		// Desbloquear el audio en el primer gesto del usuario (los navegadores lo exigen;
 		// en iOS Safari concretamente hace falta un touchstart/click real, no basta pointerdown).
 		AUDIO_UNLOCK_EVENTS.forEach((evt) =>
-			window.addEventListener(evt, unlockAudioOnce, { passive: true })
+			window.addEventListener(evt, unlockAudioOnGesture, { passive: true })
 		);
 
 		delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -386,7 +388,7 @@
 		}
 
 		watchId = navigator.geolocation.watchPosition(
-			(pos) => {
+			async (pos) => {
 				const lat = pos.coords.latitude;
 				const lng = pos.coords.longitude;
 				userPosition = { lat, lng };
@@ -397,7 +399,7 @@
 
 				// Solo al cruzar de fuera a dentro (o al abrir ya estando dentro).
 				if (inside && wasInside !== true) {
-					playZoneEnter();
+					await playZoneEnter();
 				}
 				wasInside = inside;
 
@@ -467,7 +469,7 @@
 			clearInterval(headerPollInterval);
 		}
 		if (typeof window !== 'undefined') {
-			AUDIO_UNLOCK_EVENTS.forEach((evt) => window.removeEventListener(evt, unlockAudioOnce));
+			AUDIO_UNLOCK_EVENTS.forEach((evt) => window.removeEventListener(evt, unlockAudioOnGesture));
 		}
 		if (map) {
 			map.remove();
