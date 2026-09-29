@@ -240,13 +240,25 @@ DECLARE
   v_cd TEXT; v_zd TEXT; v_result TEXT;
   v_civil_damage INT := 0; v_zombie_damage INT := 0;
   v_dice JSONB := NULL; v_civil_msg TEXT; v_zombie_msg TEXT;
-  v_civil_cooldown INT := 180; v_zombie_cooldown INT := 180;
+  v_civil_cooldown INT; v_zombie_cooldown INT;
   v_civil_roll INT; v_zombie_roll INT; v_rolls JSONB := '[]'::JSONB;
   v_civil_new_life INT; v_zombie_new_life INT;
   v_civil_converted BOOLEAN := false; v_zombie_neutralized BOOLEAN := false;
   v_situation TEXT;
   v_now TIMESTAMPTZ := NOW();
+  v_player_count INT;
+  v_density_scale NUMERIC;
 BEGIN
+  -- Los tiempos base (180s / 300s) se diseñaron para 20 jugadores en la zona.
+  -- El test real del 07/08 se jugó con 10 y produjo hasta un 92% de tiempo en
+  -- cooldown para algunos jugadores (ver análisis 29/09/2026: hasta 8/10 testers
+  -- bloqueados a la vez). Se escala el cooldown a la densidad real de jugadores
+  -- activos en vez de fijar un valor único que solo es correcto para 20.
+  SELECT COUNT(*) INTO v_player_count FROM players WHERE nick LIKE 'tester%';
+  v_density_scale := LEAST(1.0, v_player_count::NUMERIC / 20);
+  v_civil_cooldown := GREATEST(45, ROUND(180 * v_density_scale));
+  v_zombie_cooldown := GREATEST(45, ROUND(180 * v_density_scale));
+
   SELECT * INTO v_enc FROM encounters WHERE id = p_encounter_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Encounter not found'; END IF;
   IF v_enc.result IS NOT NULL THEN
@@ -260,7 +272,8 @@ BEGIN
   SELECT * INTO v_zombie FROM players WHERE id = v_enc.zombie_id FOR UPDATE;
 
   IF v_cd = 'HUIR' AND v_zd = 'MORDER' THEN
-    v_result := 'civil_escaped'; v_civil_damage := 1; v_civil_cooldown := 300;
+    v_result := 'civil_escaped'; v_civil_damage := 1;
+    v_civil_cooldown := GREATEST(75, ROUND(300 * v_density_scale));
     v_situation := 'flee_escape';
   ELSIF v_cd = 'HUIR' AND v_zd = 'PERSEGUIR' THEN
     v_result := 'civil_caught'; v_civil_damage := 2;
