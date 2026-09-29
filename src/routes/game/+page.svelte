@@ -440,6 +440,7 @@
 				if (userMarker) {
 					userMarker.setLatLng([lat, lng]);
 					detectionCircle.setLatLng([lat, lng]);
+					map.panTo([lat, lng], { animate: true });
 				} else {
 					userMarker = L.marker([lat, lng]).addTo(map).bindPopup('Tu posición');
 					detectionCircle = L.circle([lat, lng], {
@@ -484,9 +485,18 @@
 
 		await pollHeaderStatus();
 		headerPollInterval = setInterval(pollHeaderStatus, 3000);
+
+		// El contenedor del mapa es ahora cuadrado vía CSS (aspect-ratio); al rotar el móvil
+		// o cambiar el tamaño de la ventana, Leaflet necesita que se lo digamos explícitamente.
+		window.addEventListener('resize', handleMapResize);
 	});
 
+	function handleMapResize() {
+		map?.invalidateSize();
+	}
+
 	onDestroy(() => {
+		window.removeEventListener('resize', handleMapResize);
 		if (watchId !== null) {
 			navigator.geolocation.clearWatch(watchId);
 		}
@@ -577,7 +587,10 @@
 		<p class="status-text status-small">{nearbyStatus}</p>
 	{/if}
 
-	<div bind:this={mapContainer} style="width: 100%; height: 500px; border: 1px solid #ccc;"></div>
+	<div
+		bind:this={mapContainer}
+		style="width: 100%; max-width: 500px; aspect-ratio: 1 / 1; border: 1px solid #ccc; margin: 0 auto;"
+	></div>
 	<RadioReceptora events={radioEvents} />
 
 	{#if activeEncounter}
