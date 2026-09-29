@@ -798,8 +798,25 @@ GRANT SELECT   ON public.nearby_players                                   TO aut
 
 -- Endurecimiento: el cliente NO debe poder cerrar la partida ni rebarajar roles.
 -- Estas funciones solo las usan los crons (service_role) y Angel desde el editor.
-REVOKE EXECUTE ON FUNCTION public.assign_roles_balanced(INT) FROM anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.close_game()               FROM anon, authenticated;
+--
+-- IMPORTANTE (descubierto 29/09/2026, vía Security Advisor de Supabase): un REVOKE
+-- "FROM anon, authenticated" NO es suficiente. Toda función nueva en Postgres concede
+-- EXECUTE a PUBLIC por defecto, y anon/authenticated heredan ese permiso de PUBLIC
+-- aunque se les revoque individualmente. Hay que revocar de PUBLIC explícitamente,
+-- o el REVOKE de abajo es cosmético y la función sigue siendo invocable por cualquiera
+-- con la clave anon pública vía /rest/v1/rpc/<función>. Esto pasó de verdad: la base
+-- viva tenía close_game() y assign_roles_balanced() ejecutables públicamente pese a
+-- este REVOKE, hasta que se corrigió el 29/09/2026 con FROM PUBLIC.
+REVOKE EXECUTE ON FUNCTION public.assign_roles_balanced(INT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.close_game()               FROM PUBLIC;
+
+-- resolve_encounter_transaction: función legacy, no definida en este archivo (predata
+-- prion_backend.sql), usada solo por el edge function resolve_encounter ya eliminado
+-- (ver CLAUDE.md). Sigue existiendo en la base viva como código huérfano. El 29/09/2026
+-- se le revocó EXECUTE de PUBLIC igual que a las de arriba, por el mismo motivo de
+-- seguridad — quedaba invocable públicamente sin que nada la llamara ya legítimamente.
+-- REVOKE EXECUTE ON FUNCTION public.resolve_encounter_transaction(uuid, text, integer,
+--   integer, jsonb, text, text, integer, integer) FROM PUBLIC;  -- ya aplicado en Supabase
 
 -- =====================================================================
 -- CRONS PROGRAMADOS (pg_cron) — referencia de lo activo
