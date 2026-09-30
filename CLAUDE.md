@@ -86,9 +86,25 @@ Key SQL functions (all `SECURITY DEFINER`, `search_path` pinned to `public, exte
 - `get_final_report()` — per-player view combining the frozen global report with individual stats.
 - `assign_roles_balanced()` — one-off manual reshuffle run before opening a game; only touches players
   whose `nick LIKE 'tester%'` and requires an exact headcount match, or it aborts.
-- All functions that can end/reshuffle the game (`assign_roles_balanced`, `close_game`) have EXECUTE
-  explicitly revoked from `anon`/`authenticated` — only `service_role` (crons, edge functions) or the
-  Supabase SQL editor can call them.
+- Cooldown after combat is density-scaled, not fixed: `compute_and_resolve_encounter()` computes
+  `v_density_scale := LEAST(1.0, v_player_count::NUMERIC / 20)` (player count = `tester%` accounts) and
+  applies `GREATEST(45, ROUND(180 * v_density_scale))` as the base cooldown, `GREATEST(75, ROUND(300 *
+  v_density_scale))` for the civil's clean-escape bonus (zombies always get the base duration, never the
+  bonus — only the civil that escapes a `HUIR` vs `MORDER` result gets it). The `/20` divisor is only
+  valid because the MVP zone is fixed size; it must become players/area, not players/20, before zone
+  size or count varies — known debt, not yet fixed.
+- All functions that can end/reshuffle the game (`assign_roles_balanced`, `close_game`) — plus the
+  orphaned `resolve_encounter_transaction` RPC (see Edge Functions below) — have EXECUTE revoked
+  **`FROM PUBLIC`**, not just `FROM anon, authenticated`. This distinction matters: a bare `REVOKE ...
+  FROM anon, authenticated` does *not* actually block those roles, because Postgres grants EXECUTE to
+  `PUBLIC` by default on every new function and `anon`/`authenticated` inherit it through their implicit
+  membership in `PUBLIC` regardless of an individual revoke. This was a real, live vulnerability
+  (found and fixed 29/09/2026) — anyone with the public anon key could call `close_game()` or
+  `assign_roles_balanced()`. Only `service_role` (crons, edge functions) or the Supabase SQL editor can
+  call these now. When adding a new sensitive function, revoke `FROM PUBLIC` explicitly, and verify with
+  `has_function_privilege('anon', oid, 'EXECUTE')`, not just by reading the `REVOKE` statement.
+  `apply_timeouts`/`regenerate_civils`/`restore_zombies`/`restore_radar`/`rls_auto_enable` are still
+  publicly executable (same class of issue, lower severity, not yet a closed decision either way).
 
 pg_cron schedule is not stored in the repo (config lives in Supabase); the comment block at the bottom
 of `prion_backend.sql` documents what's active: `apply_timeouts` (5s), `restore_zombies`/`restore_radar`
@@ -105,11 +121,12 @@ Each function creates two Supabase clients: an anon-key client scoped to the cal
 - `submit_decision` — called when a player picks a combat action; validates the decision is legal for
   their role in this encounter, stores it, and once both sides have decided, calls
   `compute_and_resolve_encounter` directly.
-- `resolve_encounter` — a separate combat-resolution implementation (duplicates the damage/result table
-  in TypeScript and calls an RPC `resolve_encounter_transaction`) that does **not** correspond to any
-  function currently defined in `prion_backend.sql`. It appears superseded by `submit_decision` calling
-  `compute_and_resolve_encounter` directly — treat it as legacy/dead unless you confirm it's still wired
-  up in the deployed project before relying on or modifying it.
+
+The `resolve_encounter` edge function (a separate, duplicate combat-resolution implementation calling an
+RPC `resolve_encounter_transaction`) was confirmed dead and deleted 29/09/2026, along with its
+`[functions.resolve_encounter]` block in `supabase/config.toml`. The `resolve_encounter_transaction` SQL
+function itself is still orphaned in the live database (not defined in `prion_backend.sql`, not called by
+anything) — it was not dropped, only stripped of its public EXECUTE grant (see grants note above).
 
 ### Local Supabase config
 
@@ -119,8 +136,16 @@ client) and `major_version = 17` for local Postgres.
 
 ## Project discipline & closed decisions
 
-- **MVP-first, no scope creep.** The MVP is functionally complete and awaiting a real-world density test. Do not propose new features, systems, or "missing" mechanics as if they were gaps. Sequencing is deliberate, not accidental.
+- **MVP closed and validated 21/09/2026.** It shipped without the originally planned 20-player test —
+  the real bar (do people want to replay?) was already met by the 07/08/2026 field test. This is not a
+  lowered bar, it's a closed decision. Do not reopen it or propose the 20-player test as outstanding work.
 - **Server is the single source of truth.** Combat and game logic live in Postgres (compute_and_resolve_encounter). This is a closed architectural decision — do not suggest moving logic to the client or edge functions.
-- **Parked for v1 (NOT bugs, NOT pending work):** zombie progression (brain-eating → power), sonar-sweep radar visual, narrative tension during the resolution wait, polling→realtime migration, Sims-style solo mode (daily character care, training), geolocated equipment and missions. These are intentionally deferred. Do not flag their absence.
 - **Combat logic is closed.** The six combat branches and the dice mechanic are validated and final. Do not redesign them without an explicit request.
+- **v2 is now in progress (started 29–30/09/2026).** The items below, "parked for v1," are the actual
+  starting material for v2 — they are no longer things to leave alone, they're the backlog. Current
+  design status (what's decided vs. still open) lives in the project doc
+  (`claude/prion-estado-actual.md` in the Prion project on claude.ai), not in this file — this file only
+  gets updated once a v2 change actually lands in code/schema, same as it always has for v1. Do not
+  assume anything about v2 mechanics is implemented without checking the actual code/schema first.
+- **Parked for v1, now v2 starting material (NOT bugs):** zombie progression (brain-eating → power), sonar-sweep radar visual, narrative tension during the resolution wait, polling→realtime migration, Sims-style solo mode (daily character care, training), geolocated equipment and missions. The zone concept itself (currently a fixed ~6ha polygon) is also on the table for removal in v2 ("zona = mundo" — playable anywhere, no polygon) but this is explicitly paused, not decided: v2 volunteer testing may want the zone kept as a test condition, so don't remove or rework zone code without confirming current status in the project doc first.
 - When unsure whether something is a bug or a deliberate choice, ask before changing it.
