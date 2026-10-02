@@ -781,9 +781,9 @@ INSERT INTO public.narrative (situation, role, message) VALUES
 -- =====================================================================
 GRANT EXECUTE ON FUNCTION public.get_playable_zone()                      TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_inside_zone(UUID)                     TO authenticated;
-GRANT EXECUTE ON FUNCTION public.find_nearby_opponent(UUID, TEXT)         TO authenticated;
+GRANT EXECUTE ON FUNCTION public.find_nearby_opponent(UUID, TEXT)         TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.is_game_active()                         TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.get_final_report(UUID)                   TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_final_report(UUID)                   TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.pick_narrative(TEXT, TEXT)               TO service_role;
 GRANT EXECUTE ON FUNCTION public.create_encounter_transaction(UUID, UUID) TO service_role;
 GRANT EXECUTE ON FUNCTION public.compute_and_resolve_encounter(UUID)      TO service_role;
@@ -809,6 +809,19 @@ GRANT SELECT   ON public.nearby_players                                   TO aut
 -- este REVOKE, hasta que se corrigió el 29/09/2026 con FROM PUBLIC.
 REVOKE EXECUTE ON FUNCTION public.assign_roles_balanced(INT) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.close_game()               FROM PUBLIC;
+
+-- 02/10/2026 (Security Advisor tras la migración v2_001): mismo agujero en cuatro
+-- funciones más. create_encounter_transaction y compute_and_resolve_encounter estaban
+-- pensadas solo para service_role (edge functions detect_encounter / submit_decision)
+-- pero cualquiera con la clave anon podía crear y resolver encuentros entre jugadores
+-- arbitrarios. find_nearby_opponent y get_final_report quedaban abiertas a anon.
+-- Corregido y verificado con has_function_privilege(): anon sin acceso a las cuatro;
+-- service_role conserva acceso (detect_encounter usa find_nearby_opponent con la
+-- clave de servicio, por eso se le concede explícitamente arriba).
+REVOKE EXECUTE ON FUNCTION public.create_encounter_transaction(UUID, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.compute_and_resolve_encounter(UUID)      FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.find_nearby_opponent(UUID, TEXT)         FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_final_report(UUID)                   FROM PUBLIC, anon;
 
 -- resolve_encounter_transaction: función legacy, no definida en este archivo (predata
 -- prion_backend.sql), usada solo por el edge function resolve_encounter ya eliminado
