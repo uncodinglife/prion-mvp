@@ -15,11 +15,16 @@ CREATE TABLE public.players (id uuid PRIMARY KEY REFERENCES auth.users(id), nick
  life smallint NOT NULL DEFAULT 10, position geography, position_updated_at timestamptz, status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','radar_disabled','neutralized','eliminated')),
  status_until timestamptz, current_encounter_id uuid, joined_at timestamptz DEFAULT now(), consent_given_at timestamptz, consent_anonymize_at timestamptz,
  real_name text, birth_year int, gender text);
-CREATE TABLE public.encounters(id uuid primary key default gen_random_uuid(), civil_id uuid references players(id), zombie_id uuid references players(id));
+CREATE TABLE public.encounters(id uuid primary key default gen_random_uuid(), civil_id uuid references players(id), zombie_id uuid references players(id),
+ civil_decision text, zombie_decision text, civil_decision_at timestamptz, zombie_decision_at timestamptz, dice_roll jsonb, result text,
+ civil_damage smallint DEFAULT 0, zombie_damage smallint DEFAULT 0, started_at timestamptz NOT NULL DEFAULT now(), resolved_at timestamptz,
+ civil_timed_out boolean NOT NULL DEFAULT false, zombie_timed_out boolean NOT NULL DEFAULT false);
+CREATE TABLE public.narrative (id bigserial primary key, situation text, role text, message text);
+CREATE FUNCTION public.pick_narrative(p_situation text, p_role text DEFAULT NULL) RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
 CREATE TABLE public.events (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), player_id uuid NOT NULL REFERENCES players(id), type text NOT NULL, message text NOT NULL,
  related_encounter_id uuid REFERENCES encounters(id), metadata jsonb, created_at timestamptz NOT NULL DEFAULT now());
 CREATE FUNCTION public.is_game_active() RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;
-CREATE FUNCTION public.find_nearby_opponent(p_player_id uuid, p_opposite_role text) RETURNS TABLE(id uuid) LANGUAGE sql AS $$ SELECT null::uuid $$;
+CREATE FUNCTION public.find_nearby_opponent(p_player_id uuid, p_opposite_role text) RETURNS TABLE(id uuid, nick text, distance_meters double precision) LANGUAGE sql AS $$ SELECT null::uuid, null::text, null::float8 WHERE false $$;
 CREATE FUNCTION public.is_inside_zone(p_player_id uuid) RETURNS boolean LANGUAGE sql AS $$ SELECT true $$;
 CREATE FUNCTION public.get_nearby_players() RETURNS TABLE(id uuid, nick text, role text, lat double precision, lng double precision, status text, distance_meters double precision) LANGUAGE sql AS $$ SELECT null::uuid,null,null,null::float8,null::float8,null,null::float8 WHERE false $$;
 CREATE VIEW public.nearby_players WITH (security_invoker=true) AS SELECT id,nick,role,lat,lng,status,distance_meters FROM get_nearby_players();
