@@ -1,5 +1,6 @@
 -- =====================================================================
 -- Prion v2.0 — Migración 002: funciones del servidor del mundo continuo
+-- APLICADA en prion-mvp el 02/10/2026 (editor SQL). Crons 7 y 8 activos.
 -- Redactada 02/10/2026 sobre el esquema real de prion-mvp (001 aplicada).
 -- Probada entera sobre una réplica local (Postgres 16 + PostGIS) antes de
 -- aplicarla: alta, histéresis, efectos, saqueo, olfato, brotes, permisos.
@@ -996,3 +997,9 @@ REVOKE EXECUTE ON FUNCTION public.get_nearby_players() FROM PUBLIC, anon, authen
 -- ---------------------------------------------------------------------
 SELECT cron.schedule('prion-v2-tick', '* * * * *', 'SELECT public.v2_tick();');
 SELECT cron.schedule('prion-v2-outbreaks', '7 * * * *', 'SELECT public.v2_outbreak_scheduler();');
+
+-- ---------------------------------------------------------------------
+-- Aplicado después (02/10/2026), decisiones de juego de Angel:
+--   UPDATE game_params SET value = 1 WHERE key = 'zombie_refuge_drain';
+--   (zombie_up_resistance = 60 y escondite 10-15 m confirmados.)
+-- ---------------------------------------------------------------------
