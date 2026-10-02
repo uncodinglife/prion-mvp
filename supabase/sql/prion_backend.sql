@@ -823,6 +823,25 @@ REVOKE EXECUTE ON FUNCTION public.compute_and_resolve_encounter(UUID)      FROM 
 REVOKE EXECUTE ON FUNCTION public.find_nearby_opponent(UUID, TEXT)         FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.get_final_report(UUID)                   FROM PUBLIC, anon;
 
+-- 02/10/2026 (cierre completo): ninguna función SECURITY DEFINER queda ejecutable
+-- por anon. Mantenimiento -> solo crons (corren como postgres) y service_role.
+-- Lectura -> solo authenticated (la partida exige sesión) y service_role.
+-- Verificado: SET ROLE anon -> permission denied; SET ROLE authenticated -> la vista
+-- nearby_players, is_game_active() y get_playable_zone() responden.
+REVOKE EXECUTE ON FUNCTION public.apply_timeouts()           FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.regenerate_civils()        FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.restore_zombies()          FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.restore_radar()            FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.rls_auto_enable()          FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.handle_new_user()          FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.pick_narrative(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.is_inside_zone(UUID)       FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_playable_zone()        FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.is_game_active()           FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.get_nearby_players()       FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.is_inside_zone(UUID), public.get_playable_zone(),
+                           public.get_nearby_players()       TO service_role;
+
 -- resolve_encounter_transaction: función legacy, no definida en este archivo (predata
 -- prion_backend.sql), usada solo por el edge function resolve_encounter ya eliminado
 -- (ver CLAUDE.md). Sigue existiendo en la base viva como código huérfano. El 29/09/2026
