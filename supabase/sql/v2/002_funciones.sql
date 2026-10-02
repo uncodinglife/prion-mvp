@@ -1,6 +1,8 @@
 -- =====================================================================
 -- Prion v2.0 — Migración 002: funciones del servidor del mundo continuo
 -- Redactada 02/10/2026 sobre el esquema real de prion-mvp (001 aplicada).
+-- Probada entera sobre una réplica local (Postgres 16 + PostGIS) antes de
+-- aplicarla: alta, histéresis, efectos, saqueo, olfato, brotes, permisos.
 --
 -- Alcance:
 --   1. Alta de personaje (ficha del censo, tramo, life_max, comida, casa).
@@ -984,10 +986,10 @@ TO authenticated;
 
 -- Fuga: aceptaban un id arbitrario y nearby_players expone ids. El
 -- cliente no las usa; las edge functions van con service_role.
-REVOKE EXECUTE ON FUNCTION public.find_nearby_opponent(uuid, text) FROM authenticated;
-REVOKE EXECUTE ON FUNCTION public.is_inside_zone(uuid) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.find_nearby_opponent(uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.is_inside_zone(uuid) FROM PUBLIC, anon, authenticated;
 -- Sustituida por get_radar() detrás de la vista.
-REVOKE EXECUTE ON FUNCTION public.get_nearby_players() FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_nearby_players() FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- 12. Crons
