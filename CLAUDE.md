@@ -103,12 +103,38 @@ Key SQL functions (all `SECURITY DEFINER`, `search_path` pinned to `public, exte
   `assign_roles_balanced()`. Only `service_role` (crons, edge functions) or the Supabase SQL editor can
   call these now. When adding a new sensitive function, revoke `FROM PUBLIC` explicitly, and verify with
   `has_function_privilege('anon', oid, 'EXECUTE')`, not just by reading the `REVOKE` statement.
-  `apply_timeouts`/`regenerate_civils`/`restore_zombies`/`restore_radar`/`rls_auto_enable` are still
-  publicly executable (same class of issue, lower severity, not yet a closed decision either way).
+  Since PR #6 (02/10/2026) no SECURITY DEFINER function is executable by `anon`; maintenance functions
+  are cron/service_role only. Since migration v2 002, `find_nearby_opponent`, `is_inside_zone` and
+  `get_nearby_players` are no longer executable by `authenticated` either (they accepted arbitrary
+  player ids, and `nearby_players` exposes ids).
 
 pg_cron schedule is not stored in the repo (config lives in Supabase); the comment block at the bottom
 of `prion_backend.sql` documents what's active: `apply_timeouts` (5s), `restore_zombies`/`restore_radar`
 (30s), `regenerate_civils` (hourly), `close_game` (30s).
+
+### v2 backend (world without matches) — `supabase/sql/v2/`
+
+Numbered migrations, applied by hand in the SQL editor, each file mirrors what is live:
+`001_modelo_base.sql` (tables, `game_params`, catalogs) and `002_funciones.sql` (server functions).
+`tests/` holds a minimal local replica of the v1 schema plus functional tests for a local Postgres +
+PostGIS (never run them on Supabase). v2 players are those with `age_band IS NOT NULL`; v1 crons and
+functions ignore them, and v2 functions leave v1 players alone.
+
+- All balance numbers live in `game_params`, read with `v2_param(key)`. Never hardcode them.
+- Continuous effects (food, hunger, incubation, refuge drain, home regen with `resting`, zombie
+  down/up, refuge expiry) are integrated lazily by `v2_apply_effects(player)` over
+  `[last_effects_at, now]` (capped by `effects_max_gap_minutes`), called by every player action and
+  by the `prion-v2-tick` cron (1 min). `life_pending` is the signed fractional-life accumulator.
+- Player RPCs (authenticated only): `create_character`, `set_mixed_zone`, `report_position(lat, lng,
+  accuracy)`, `activate_refuge('mixed'|'hideout')`, `set_resting`, `eat_extra_ration`,
+  `activate_overexcite`, and `get_radar()` behind the `nearby_players` view (`blood_scent` column).
+- Inside a refuge the player's `position` is NULL: invisible on radar, unreachable by the v1
+  encounter engine, and no point taken at home is ever stored. Refuge polygons have no RLS policy.
+- Outbreaks: `v2_trigger_outbreak()` (manual, SQL editor) and the `prion-v2-outbreaks` cron, off
+  while `outbreak_auto = 0`.
+- Pending: the frontend still writes `position` directly (works for v1 players); switching to
+  `report_position` and then revoking the column UPDATE grant is the next frontend step. Combat is
+  still v1 and has not been adapted to v2 life scales.
 
 ### Edge Functions (`supabase/functions/*/index.ts`, Deno)
 
