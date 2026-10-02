@@ -1,5 +1,6 @@
 -- =====================================================================
 -- Prion v2.0 — Migración 003: combate en el mundo continuo
+-- APLICADA en prion-mvp el 02/10/2026 (conector de Supabase).
 -- Redactada 02/10/2026 sobre el esquema real de prion-mvp (002 aplicada).
 --
 -- Decisión de juego (Angel, 01/10): mientras no exista combate v2 (v2.3),

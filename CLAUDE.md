@@ -114,8 +114,9 @@ of `prion_backend.sql` documents what's active: `apply_timeouts` (5s), `restore_
 
 ### v2 backend (world without matches) — `supabase/sql/v2/`
 
-Numbered migrations, applied by hand in the SQL editor, each file mirrors what is live:
-`001_modelo_base.sql` (tables, `game_params`, catalogs) and `002_funciones.sql` (server functions).
+Numbered migrations, each file mirrors what is live: `001_modelo_base.sql` (tables, `game_params`,
+catalogs), `002_funciones.sql` (server functions) and `003_combate.sql` (combat in the continuous
+world).
 `tests/` holds a minimal local replica of the v1 schema plus functional tests for a local Postgres +
 PostGIS (never run them on Supabase). v2 players are those with `age_band IS NOT NULL`; v1 crons and
 functions ignore them, and v2 functions leave v1 players alone.
@@ -132,9 +133,17 @@ functions ignore them, and v2 functions leave v1 players alone.
   encounter engine, and no point taken at home is ever stored. Refuge polygons have no RLS policy.
 - Outbreaks: `v2_trigger_outbreak()` (manual, SQL editor) and the `prion-v2-outbreaks` cron, off
   while `outbreak_auto = 0`.
+- Combat (003): v2 players only ever meet v2 players (also enforced in `find_nearby_opponent`).
+  v2 detection runs inside `report_position` via `v2_try_encounter` (no game session, no zone; rival
+  locked with `SKIP LOCKED` to avoid deadlocks); the v1 edge function `detect_encounter` is untouched.
+  `compute_and_resolve_encounter` keeps the v1 decision table and dice, but for two v2 players
+  multiplies damage by `combat_damage_scale` (x10, Angel's decision until combat v2), uses
+  `combat_cooldown_s`/`combat_flee_cooldown_s`, converts via `v2_convert_to_zombie` and drops zombies
+  via `v2_zombie_fall`. `apply_timeouts` resolves v2 encounters without an active session; v2 radar
+  cooldowns expire in `v2_apply_effects` (v1's `restore_radar` only runs during a session).
 - Pending: the frontend still writes `position` directly (works for v1 players); switching to
-  `report_position` and then revoking the column UPDATE grant is the next frontend step. Combat is
-  still v1 and has not been adapted to v2 life scales.
+  `report_position` (which now also returns `encounter_id` and `status`) and then revoking the column
+  UPDATE grant is the next frontend step.
 
 ### Edge Functions (`supabase/functions/*/index.ts`, Deno)
 
