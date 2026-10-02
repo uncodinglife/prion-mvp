@@ -113,12 +113,14 @@ SELECT 'loot_start' t, report_position(41.775, 3.035, 8)->'loot';
 SELECT 'loot_sigue' t, report_position(41.775, 3.035, 8)->'loot'->>'state';
 RESET ROLE; UPDATE poi_visits SET started_at = now() - interval '11 minutes' WHERE player_id=uid(3); SET ROLE authenticated;
 SELECT 'loot_fin' t, report_position(41.775, 3.035, 8)->'loot', report_position(41.775, 3.035, 8)->'loot'->>'state' despues;
--- zombie proteína
+-- zombie proteína (sin civiles cerca: si no, el combate interrumpe el saqueo)
+RESET ROLE; UPDATE players SET position=NULL WHERE id IN (uid(2),uid(3),uid(4)); SET ROLE authenticated;
 SELECT as_user(1); RESET ROLE; UPDATE players SET life=30 WHERE id=uid(1); SET ROLE authenticated;
 SELECT report_position(41.775, 3.035, 8)->'loot'->>'state';
 RESET ROLE; UPDATE poi_visits SET started_at = now() - interval '11 minutes' WHERE player_id=uid(1) AND completed_at IS NULL; SET ROLE authenticated;
 SELECT 'proteina' t, report_position(41.775, 3.035, 8)->>'life';
 -- abortar saliendo
+RESET ROLE; UPDATE players SET position=NULL WHERE id=uid(1); SET ROLE authenticated;
 SELECT as_user(4); SELECT report_position(41.775, 3.035, 8)->'loot'->>'state';
 SELECT 'loot_abort' t, report_position(41.778, 3.035, 8)->'loot'->>'state';
 
