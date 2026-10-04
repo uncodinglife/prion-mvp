@@ -4,6 +4,18 @@ de un Postgres LOCAL con PostGIS (no Supabase). Uso:
 """
 import json, sys
 
+if "--raw2" in sys.argv:
+    # Segunda consulta: calles y edificios.
+    d = json.load(open(sys.argv[1]))
+    print("DROP TABLE IF EXISTS raw2; CREATE TABLE raw2 (osm text, kind text, hw text, props jsonb, g geometry);")
+    for f in d["features"]:
+        p = f["properties"]
+        kind = "building" if "building" in p else "street" if "highway" in p else "other"
+        q = lambda x: "NULL" if x is None else "'" + str(x).replace("'", "''") + "'"
+        print(f"INSERT INTO raw2 VALUES ({q(p.get('@id'))},{q(kind)},{q(p.get('highway'))},"
+              f"{q(json.dumps(p))}::jsonb, ST_SetSRID(ST_GeomFromGeoJSON({q(json.dumps(f['geometry']))}),4326));")
+    sys.exit(0)
+
 d = json.load(open(sys.argv[1]))
 print("DROP TABLE IF EXISTS raw; CREATE TABLE raw (osm text, kind text, name text, props jsonb, g geometry);")
 for f in d["features"]:

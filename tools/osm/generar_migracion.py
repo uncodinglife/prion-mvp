@@ -6,7 +6,7 @@ def q(sql):
 B=lambda e: f"translate(encode({e},'base64'),E'\\n','')"
 MG=B("ST_AsTWKB(ST_Multi(ST_Transform(ST_SimplifyPreserveTopology(ST_Transform(g,25831),15),4326)),5)")
 munis=q(f"select osm, name, {MG} from raw where kind='muni' order by name")
-pois=q(f"""select p.osm, p.name, {B("ST_AsTWKB(ST_Transform(p.pt,4326),6)")}, {B("ST_AsTWKB(ST_Transform(p.zone,4326),6)")},
+pois=q(f"""select p.osm, p.name, {B("ST_AsTWKB(ST_Transform(p.pt,4326),6)")}, {B("ST_AsTWKB((SELECT d.geom FROM ST_Dump(ST_ReducePrecision(ST_MakeValid(ST_Transform(p.zone,4326)),0.000001)) d WHERE GeometryType(d.geom)='POLYGON' ORDER BY ST_Area(d.geom) DESC LIMIT 1),6)")},
  (select m.osm from raw m where m.kind='muni' and ST_Intersects(ST_Transform(m.g,25831), p.pt) limit 1) from final_pois p order by p.name, p.osm""")
 src=open('supabase/sql/v2/002_funciones.sql').read()
 i=src.index("CREATE OR REPLACE FUNCTION public.create_character(")

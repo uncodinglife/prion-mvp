@@ -7,7 +7,10 @@ El resultado es una migración SQL autocontenida (geometrías en TWKB base64) qu
 2. `python3 tools/osm/geojson_a_sql.py export.geojson > raw.sql` y cargarlo en una base local `osm`.
 3. `psql -d osm -f tools/osm/zonas_saqueo.sql` calcula la zona de saqueo de cada supermercado
    (EPSG:25831): espacio peatonal a <= 40 m del local, menos parques y el propio local; parte mayor.
-4. `psql -d osm -f tools/osm/dedup.sql` se queda con las zonas >= 80 m² y fusiona duplicados.
+4. Segunda consulta (`consulta_overpass_aceras.txt`: calles y edificios), convertida con
+   `geojson_a_sql.py --raw2` a la tabla `raw2`, y `psql -d osm -f tools/osm/zonas_acera.sql`: acera
+   para los supermercados sin zona peatonal, combinación final y fusión de duplicados
+   (sustituye a `dedup.sql`, que queda como versión solo peatonal).
 5. `python3 tools/osm/generar_migracion.py` escribe la migración 004.
 
 Para otra comarca, cambiar el nombre del área en la consulta y numerar la migración nueva

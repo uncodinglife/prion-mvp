@@ -4,20 +4,24 @@
 -- procesado con tools/osm/ (ver README). Geometrías en TWKB base64.
 --
 -- Decisiones de Angel: la población se deduce de la casa (02/10); los
--- supermercados son reales, empiezan inactivos y se descartan los que no
--- tienen espacio público adecuado al lado; la zona de saqueo está en la
--- calle peatonal o plaza junto al local, nunca en parques o jardines.
+-- supermercados son reales y empiezan inactivos; la zona de saqueo está en
+-- el espacio público junto al local, nunca en parques o jardines; se acepta
+-- la acera cuando no hay calle peatonal ni plaza (04/10).
 --
 -- Criterios técnicos (Claude):
 --   * Límites municipales simplificados a 15 m: solo sirven para saber en
 --     qué población está una casa o un supermercado.
---   * Zona de saqueo = (calles peatonales, plazas y áreas viarias a <= 40 m
---     del local) - (parques, jardines, parques infantiles) - (el propio
---     local); se queda la parte mayor; mínimo 80 m². Las calles peatonales
---     que OSM tiene solo como línea se ensanchan 3 m a cada lado.
+--   * Prioridad 1, peatonal: calles peatonales, plazas y áreas viarias a
+--     <= 40 m del local (las que OSM tiene como línea, ensanchadas 3 m).
+--   * Prioridad 2, acera: franja a 3-7 m del eje de calles normales y a
+--     5-9 m de calles principales; calles de convivencia y aceras dibujadas
+--     como camino, enteras. No cuentan las vías de servicio (aparcamientos,
+--     accesos privados).
+--   * A ambas se les restan parques, jardines, parques infantiles y, en la
+--     acera, los edificios. Se queda la parte mayor; mínimo 80 m².
 --   * Locales duplicados en OSM (nodo + edificio del mismo nombre a < 40 m)
 --     se fusionan.
---   * Resultado: 115 supermercados en OSM, 26 con zona de saqueo válida.
+--   * Resultado: 115 supermercados en OSM; 106 con zona (26 peatonal, 80 acera).
 -- =====================================================================
 
 CREATE TABLE public.municipalities (
