@@ -6,15 +6,16 @@
 --   * Todo en puntos de vida. Sobrevivir desgasta vida cada día según el
 --     tramo: joven 3, medio 2, mayor 1. Las raciones ya no se consumen solas
 --     ni hay daño por hambre: se comen a mano y cada ración da +1 de vida.
---   * En casa: hasta 6 raciones al día de las existencias propias, sin tiempo.
+--   * En casa: hasta 6 raciones al día de las existencias propias, sin tiempo,
+--     solo si el jugador lo activa (si se olvida, no come).
 --   * Supermercado: existencias controladas por el servidor (solo
 --     "alimentos"); llenas al activarse; agotado sigue activo y vacío. El
 --     civil no sabe si hay comida hasta estar dentro.
 --   * Saqueo: hasta 3 raciones por saqueo, combinando comer allí (3 min por
 --     ración, +1 de vida) y llevárselas a casa (3 min la carga). Máximo 2
 --     saqueos al día en supermercados distintos; el mismo supermercado, una
---     vez cada 72 h. Salir de la zona o un ataque cancelan lo que está en
---     curso (el ataque provoca el combate).
+--     vez cada 72 h. Un ataque (tiene preferencia: provoca el combate) o
+--     salir de la zona cancelan lo que está en curso.
 --   * La proteína desaparece: los zombies no saquean.
 --   * Activación: un supermercado se activa cuando hay al menos 3 jugadores
 --     con casa a menos de 1 km; no se desactiva.
@@ -61,7 +62,6 @@ INSERT INTO public.game_params (key, value, unit, description) VALUES
   ('loot_take_minutes',          3,   'min',      'Tiempo para cargar las raciones que se lleva a casa (la carga entera)'),
   ('loot_ration_heal',           1,   'vida',     'Vida por ración comida en el supermercado'),
   ('loot_visits_per_day',        2,   'saqueos',  'Saqueos al día (en supermercados distintos)'),
-  ('loot_other_poi_cooldown_h',  0,   'h',        'PENDIENTE DE ACLARAR. Horas entre saqueos en supermercados distintos (0 = solo cuenta el máximo diario)'),
   ('loot_settle_max_age_s',      90,  's',        'Antigüedad máxima de la última posición para que el tick dé por buena una acción de saqueo'),
   ('poi_activation_min_players', 3,   'jugadores','Jugadores con casa cerca para activar un supermercado — decidido 04/10'),
   ('poi_activation_radius_m',    1000,'m',        'Radio desde el supermercado para contar casas — decidido 04/10'),
@@ -252,9 +252,7 @@ SET search_path = public, extensions, pg_temp AS $$
 DECLARE
   v_today int;
   v_last_same timestamptz;
-  v_last_other timestamptz;
   v_same_h numeric := v2_param('loot_same_poi_cooldown_h');
-  v_other_h numeric := v2_param('loot_other_poi_cooldown_h');
 BEGIN
   SELECT count(*) INTO v_today FROM poi_visits
    WHERE player_id = p_player AND (started_at AT TIME ZONE 'Europe/Madrid')::date = v2_today();
@@ -265,13 +263,6 @@ BEGIN
   IF v_last_same IS NOT NULL AND v_last_same > now() - v_same_h::float8 * interval '1 hour' THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'Este supermercado ya lo saqueaste hace poco.',
       'available_at', v_last_same + v_same_h::float8 * interval '1 hour');
-  END IF;
-  IF v_other_h > 0 THEN
-    SELECT max(started_at) INTO v_last_other FROM poi_visits WHERE player_id = p_player AND poi_id <> p_poi;
-    IF v_last_other IS NOT NULL AND v_last_other > now() - v_other_h::float8 * interval '1 hour' THEN
-      RETURN jsonb_build_object('ok', false, 'reason', 'Aún es pronto para otro saqueo.',
-        'available_at', v_last_other + v_other_h::float8 * interval '1 hour');
-    END IF;
   END IF;
   RETURN jsonb_build_object('ok', true);
 END $$;
