@@ -1,0 +1,7 @@
+[out:json][timeout:180];
+area["name"="Baix Empordà"]["boundary"="administrative"]->.comarca;
+nwr["shop"="supermarket"](area.comarca)->.supers;
+way["highway"~"^(primary|secondary|tertiary|unclassified|residential|living_street|service|footway)$"](around.supers:60)->.calles;
+way["building"](around.supers:60)->.edificios;
+(.calles; .edificios;);
+out geom;
