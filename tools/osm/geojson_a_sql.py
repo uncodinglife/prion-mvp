@@ -4,6 +4,17 @@ de un Postgres LOCAL con PostGIS (no Supabase). Uso:
 """
 import json, sys
 
+if "--entradas" in sys.argv:
+    # Tercera consulta: nodos de entrada.
+    d = json.load(open(sys.argv[1]))
+    print("DROP TABLE IF EXISTS ent; CREATE TABLE ent (osm text, entrance text, g geometry);")
+    for f in d["features"]:
+        p = f["properties"]
+        x, y = f["geometry"]["coordinates"]
+        print(f"INSERT INTO ent VALUES ('{p['@id']}','{p.get('entrance', 'yes')}', "
+              f"ST_Transform(ST_SetSRID(ST_MakePoint({x},{y}),4326),25831));")
+    sys.exit(0)
+
 if "--raw2" in sys.argv:
     # Segunda consulta: calles y edificios.
     d = json.load(open(sys.argv[1]))

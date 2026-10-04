@@ -11,7 +11,11 @@ El resultado es una migración SQL autocontenida (geometrías en TWKB base64) qu
    `geojson_a_sql.py --raw2` a la tabla `raw2`, y `psql -d osm -f tools/osm/zonas_acera.sql`: acera
    para los supermercados sin zona peatonal, combinación final y fusión de duplicados
    (sustituye a `dedup.sql`, que queda como versión solo peatonal).
-5. `python3 tools/osm/generar_migracion.py` escribe la migración 004.
+5. Tercera consulta (`consulta_overpass_entradas.txt`) cargada en la tabla `ent` (punto + tipo de
+   entrada, EPSG:25831); `psql -d osm -f tools/osm/candidatos.sql` y luego
+   `psql -d osm -f tools/osm/zonas_puerta.sql`: zona compacta en la puerta (sustituye a los pasos
+   3-4 como resultado final; esos quedan para calcular `s`, `pub`, `parks`, `walk` y `bld`).
+6. `python3 tools/osm/generar_migracion.py` escribe la migración 004.
 
 Para otra comarca, cambiar el nombre del área en la consulta y numerar la migración nueva
 (los `INSERT` de `municipalities` y `pois` chocarían por `osm_id` si se repiten).
