@@ -115,8 +115,11 @@ of `prion_backend.sql` documents what's active: `apply_timeouts` (5s), `restore_
 ### v2 backend (world without matches) — `supabase/sql/v2/`
 
 Numbered migrations, each file mirrors what is live: `001_modelo_base.sql` (tables, `game_params`,
-catalogs), `002_funciones.sql` (server functions) and `003_combate.sql` (combat in the continuous
-world).
+catalogs), `002_funciones.sql` (server functions), `003_combate.sql` (combat in the continuous
+world) and `004_osm_poblaciones_supermercados.sql` (OSM data for Baix Empordà: 36 `municipalities`,
+100 supermarket `pois` with their loot zone, all inactive; `create_character` sets
+`players.municipality_id` from the home polygon). The OSM data is prepared offline with the
+scripts in `tools/osm/` (local PostGIS only; the resulting migration embeds geometries as TWKB).
 `tests/` holds a minimal local replica of the v1 schema plus functional tests for a local Postgres +
 PostGIS (never run them on Supabase). v2 players are those with `age_band IS NOT NULL`; v1 crons and
 functions ignore them, and v2 functions leave v1 players alone.

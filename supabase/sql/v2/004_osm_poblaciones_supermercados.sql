@@ -1,4 +1,5 @@
 -- =====================================================================
+-- APLICADA en prion-mvp el 04/10/2026 (editor SQL).
 -- Prion v2.0 — Migración 004: poblaciones y supermercados (OpenStreetMap)
 -- Datos: export de overpass-turbo del 02/10/2026 (Baix Empordà),
 -- procesado con tools/osm/ (ver README). Geometrías en TWKB base64.
