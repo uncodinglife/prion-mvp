@@ -3,7 +3,7 @@
  *
  * Replica EXACTAMENTE lo que hace el cliente real (src/routes/game/+page.svelte):
  *   1. Login email/password (supabase.auth.signInWithPassword).
- *   2. UPDATE de players.position (WKT POINT) + position_updated_at.
+ *   2. RPC report_position(lat, lng, accuracy) (desde la migración v2 002; antes UPDATE directo).
  *   3. Invoca la Edge Function detect_encounter (sin parámetros).
  *   4. Sondea su propia fila players.current_encounter_id.
  *   5. Si hay encuentro sin resolver, invoca submit_decision { encounter_id, decision }.
@@ -140,10 +140,8 @@ async function runBot(cred, idx, poly, box, stopAt) {
     try {
       // 1) mover (caminar humano: mantiene rumbo, gira en esquinas, rebota en el borde)
       ({ lat, lng, heading } = walk(lat, lng, heading, poly, box));
-      // 2) enviar posición (idéntico al cliente: update directo a players)
-      const { error: upErr } = await sb.from('players')
-        .update({ position: `POINT(${lng} ${lat})`, position_updated_at: new Date().toISOString() })
-        .eq('id', uid);
+      // 2) enviar posición (idéntico al cliente: RPC report_position, precisión simulada 5 m)
+      const { error: upErr } = await sb.rpc('report_position', { p_lat: lat, p_lng: lng, p_accuracy: 5 });
       if (upErr) { stats.errors++; console.error(`${tag} update pos: ${upErr.message}`); }
       else stats.positions++;
 
