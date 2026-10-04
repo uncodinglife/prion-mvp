@@ -1,4 +1,5 @@
 -- =====================================================================
+-- APLICADA en prion-mvp el 04/10/2026 (editor SQL). Cron 9 = prion-v2-pois.
 -- Prion v2.0 — Migración 005: existencias, saqueo nuevo y activación
 -- Redactada 04/10/2026 sobre el esquema real de prion-mvp (004 aplicada).
 --
