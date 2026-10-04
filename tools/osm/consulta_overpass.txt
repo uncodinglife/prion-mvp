@@ -1,0 +1,14 @@
+[out:json][timeout:180];
+area["name"="Baix Empordà"]["boundary"="administrative"]->.comarca;
+relation["boundary"="administrative"]["admin_level"="8"](area.comarca)->.munis;
+nwr["shop"="supermarket"](area.comarca)->.supers;
+(
+  way["highway"="pedestrian"](around.supers:80);
+  relation["highway"="pedestrian"](around.supers:80);
+  way["place"="square"](around.supers:80);
+  relation["place"="square"](around.supers:80);
+  way["area:highway"](around.supers:80);
+)->.peatonal;
+nwr["leisure"~"^(park|garden|playground)$"](around.supers:80)->.excluir;
+(.munis; .supers; .peatonal; .excluir;);
+out geom;
