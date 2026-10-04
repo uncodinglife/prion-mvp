@@ -669,7 +669,6 @@ BEGIN
 
   SELECT * INTO p FROM players WHERE id = v_uid;
 
-  -- Saqueo (solo fuera de refugio, en pie y sin encuentro).
   -- Saqueo (civiles): avance y cancelación de la acción en curso, y qué ofrece
   -- el supermercado en el que está (sin revelar existencias desde fuera).
   v_loot := v2_loot_settle(v_uid, v_point, v_good);
