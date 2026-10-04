@@ -120,6 +120,13 @@ world) and `004_osm_poblaciones_supermercados.sql` (OSM data for Baix Empordà: 
 100 supermarket `pois` with their loot zone, all inactive; `create_character` sets
 `players.municipality_id` from the home polygon). The OSM data is prepared offline with the
 scripts in `tools/osm/` (local PostGIS only; the resulting migration embeds geometries as TWKB).
+`005_existencias_saqueo.sql`: everything is life points (daily drain by age band in
+`age_bands.life_drain_per_day`, no automatic ration consumption or hunger damage); home rations via
+`eat_home_rations(n)` (inside home, +1 each, 6/day); supermarket looting via `loot_action('eat'|'take', n)`
+(max 3 rations per visit, 3 min per eaten ration / 3 min per carry, 2 visits/day, same supermarket every
+72 h), settled by `v2_loot_settle` from `report_position` and the tick; hidden stock in `poi_stock` (no
+RLS policy); supermarkets activate when >= 3 v2 homes are within 1 km (`v2_activate_pois`, on signup and
+cron `prion-v2-pois` every 15 min). Zombies no longer loot.
 `tests/` holds a minimal local replica of the v1 schema plus functional tests for a local Postgres +
 PostGIS (never run them on Supabase). v2 players are those with `age_band IS NOT NULL`; v1 crons and
 functions ignore them, and v2 functions leave v1 players alone.
