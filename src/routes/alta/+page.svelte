@@ -21,6 +21,7 @@
 	let errorMessage = $state<string | null>(null);
 	let locating = $state(false);
 	let registered = $state(false);
+	let municipality = $state<string | null>(null);
 
 	let mapContainer = $state<HTMLDivElement>();
 	let map: any = null;
@@ -92,7 +93,7 @@
 		if (!complete || !home || age === null) return;
 		submitting = true;
 		errorMessage = null;
-		const { error } = await supabase.rpc('create_character', {
+		const { data, error } = await supabase.rpc('create_character', {
 			p_nick: nick.trim(),
 			p_age: age,
 			p_sex: traits.sex,
@@ -111,6 +112,7 @@
 		}
 		// El punto exacto ya no hace falta: el servidor solo ha guardado la zona.
 		home = null;
+		municipality = data?.municipality ?? null;
 		registered = true;
 	}
 
@@ -179,6 +181,13 @@
 			<p class="done-text">
 				Ficha de <strong>{nick.trim()}</strong> registrada. Empiezas como civil, con
 				{ageBand === 'joven' ? 100 : ageBand === 'medio' ? 90 : 80} de vida y 20 raciones.
+			</p>
+			<p class="done-text">
+				{#if municipality}
+					Población de residencia: <strong>{municipality}</strong>.
+				{:else}
+					Tu casa queda fuera de las poblaciones registradas por ahora.
+				{/if}
 			</p>
 			<a class="primary" href="/game">Entrar en la zona</a>
 		</section>
