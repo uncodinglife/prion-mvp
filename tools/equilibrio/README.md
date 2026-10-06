@@ -5,6 +5,7 @@ Scripts de apoyo al diseño (no se ejecutan en producción). Requieren `numpy` y
 - `equilibrio_combate.py`: equilibrio de Nash de un asalto (programación lineal) para la tabla v5, con mejoras civiles y zombie mutado.
 - `sim_eliminacion.py`: Monte Carlo del combate al mejor de 3; frecuencia de eliminación del zombie según la regla de boca expuesta.
 - `q3.py`: comparación bloquea–muerde a dados frente a victoria civil directa.
-- `rps.py` (si está): pruebas iniciales de cuadro latino.
+- `rps.py`: pruebas iniciales de cuadro latino. `q3.py` lo importa con una ruta temporal antigua (`/tmp/claude-0/rps.py`); no funciona tal cual.
+- `combate_v2_secuencial.py` (06/10/2026): combate completo de 3 asaltos como juego de suma cero con información oculta (tipo de civil), resuelto en forma secuencial por programación lineal. Reglas del 06/10: fuerza continua con k, factor de salud por asalto, eliminación solo con boca expuesta y disparo, el zombie ve el botón de golpear (y deduce el tipo). Usa los daños de la tabla aceptada el 04/10, no valores abstractos. Supuestos propios marcados `[SUP]` (valoración y subjuego de agarre). Incluye espiral de muerte y coste de cada comportamiento por defecto al agotarse el tiempo. `python3 combate_v2_secuencial.py` (unos segundos).
 
-Supuesto a revisar (06/10/2026): todos asumen un zombie ciego al rango del civil durante todo el combate. Con el "pulso", la posición inicial de la frontera revela la fuerza del civil tras el asalto 1.
+Supuesto revisado en `combate_v2_secuencial.py` (06/10/2026): los scripts anteriores asumen un zombie ciego al rango del civil durante todo el combate. Con el "pulso", la posición inicial de la frontera revela la fuerza del civil tras el asalto 1.
