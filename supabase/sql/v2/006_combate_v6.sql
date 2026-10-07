@@ -370,7 +370,7 @@ DECLARE
   v_type text;
   v_infected timestamptz;
   v_heal integer := v2_param('zombie_convert_heal')::int;
-  r record;
+  v_z record;
 BEGIN
   SELECT infected_at INTO v_infected FROM players WHERE id = p_player;
 
@@ -390,15 +390,15 @@ BEGIN
     jsonb_build_object('cause', p_cause));
 
   IF v_infected IS NOT NULL THEN
-    FOR r IN
+    FOR v_z IN
       SELECT DISTINCT e.zombie_id FROM combat_rounds cr JOIN encounters e ON e.id = cr.encounter_id
        WHERE e.civil_id = p_player AND cr.bite AND cr.resolved_at >= v_infected
          AND e.zombie_id <> p_player
     LOOP
       UPDATE players SET life = LEAST(life_max, life + v_heal)
-       WHERE id = r.zombie_id AND role = 'zombie' AND down_until IS NULL;
+       WHERE id = v_z.zombie_id AND role = 'zombie' AND down_until IS NULL;
       IF FOUND THEN
-        PERFORM v2_event(r.zombie_id, 'zombie_recovered',
+        PERFORM v2_event(v_z.zombie_id, 'zombie_recovered',
           'Uno de los que mordiste ya es de los vuestros. Te sientes más fuerte.',
           jsonb_build_object('resistance', v_heal));
       END IF;
