@@ -114,7 +114,11 @@ SELECT chk('el rival no puede leer combat_rounds', NOT has_table_privilege('auth
 SELECT roll(0.01);
 SELECT decide_as(1, 'bloquear') IS NOT NULL;
 SELECT chk('B-M resuelto', (SELECT civil_won AND civil_damage = 2 AND zombie_damage = 2 AND p_civil > 0.9 FROM rnd(:'e1', 1)));
-SELECT chk('boca expuesta y punto civil', (SELECT mouth_exposed AND civil_points = 1 AND round = 2 FROM encounters WHERE id = :'e1'));
+SELECT chk('boca expuesta y punto civil', (SELECT (outcome->>'exp')::boolean FROM rnd(:'e1', 1)) AND (SELECT civil_points = 1 AND round = 2 FROM encounters WHERE id = :'e1'));
+-- El cliente lee su fila de encounters con select('*'): ahí no puede haber nada oculto.
+SELECT as_user(3); SET ROLE authenticated;
+SELECT chk('la fila de encounters que lee el zombie no delata la boca expuesta', position('exp' in (SELECT to_jsonb(e)::text FROM encounters e WHERE id = :'e1')) = 0);
+RESET ROLE;
 SELECT chk('asalto 2 de 10 s tras 5 s de pulso',
   (SELECT deadline - opens_at = interval '10 s' AND c2.opens_at > r1.resolved_at FROM combat_rounds c2,
      (SELECT resolved_at FROM combat_rounds WHERE encounter_id = :'e1' AND round = 1) r1

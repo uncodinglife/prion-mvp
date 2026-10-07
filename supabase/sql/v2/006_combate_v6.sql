@@ -211,11 +211,13 @@ ALTER TABLE public.players
 -- ---------------------------------------------------------------------
 -- 4. Encuentro v6 y asaltos
 -- ---------------------------------------------------------------------
+-- Ojo: los jugadores leen su fila de encounters (política encounters_select_own,
+-- el cliente v1 hace select('*')). Aquí solo va lo que los dos pueden ver. La
+-- boca expuesta, que nadie debe ver, vive en combat_rounds.outcome.
 ALTER TABLE public.encounters
   ADD COLUMN combat_version smallint,        -- 6 = combate v6; NULL = v1 / v2 ×10
   ADD COLUMN round          smallint,
   ADD COLUMN grab           smallint,
-  ADD COLUMN mouth_exposed  boolean,
   ADD COLUMN noise          boolean,
   ADD COLUMN civil_fails    smallint,
   ADD COLUMN civil_points   smallint,
@@ -667,6 +669,7 @@ DECLARE
   v_pc integer; v_pz integer;
   v_conv boolean; v_down boolean;
   v_reason text;
+  v_exposed boolean;
 BEGIN
   SELECT * INTO e FROM encounters WHERE id = p_encounter FOR UPDATE;
   IF NOT FOUND OR e.result IS NOT NULL OR e.combat_version IS DISTINCT FROM 6 THEN RETURN false; END IF;
@@ -690,6 +693,10 @@ BEGIN
   END IF;
 
   v_grab := r.grab;
+  -- Boca expuesta en el asalto anterior.
+  SELECT COALESCE((outcome->>'exp')::boolean, false) INTO v_exposed
+    FROM combat_rounds WHERE encounter_id = p_encounter AND round = r.round - 1;
+  v_exposed := COALESCE(v_exposed, false);
   v_a := r.civil_action;
   v_b := r.zombie_action;
   IF v_a IS NULL THEN
@@ -731,7 +738,7 @@ BEGIN
         round(v2_param('combat_hit_damage') * v2_param('combat_hit_mult_' || c.combat_gear))::int);
       -- Tiro a la silla turca: militar con arma, boca expuesta en el asalto
       -- anterior y el zombie vuelve a morder (decidido 04/10).
-      IF v_grab = 0 AND v_a = 'G' AND v_b = 'M' AND COALESCE(e.mouth_exposed, false)
+      IF v_grab = 0 AND v_a = 'G' AND v_b = 'M' AND v_exposed
          AND c.combat_gear = 'weapon' AND c.rank IN ('militar', 'medico_militar') THEN
         o := o || '{"dz":0,"end":true}'::jsonb;
         v_elim := true;
@@ -787,7 +794,6 @@ BEGIN
   v_pz := COALESCE(e.zombie_points, 0) + COALESCE((o->>'pz')::int, 0);
   UPDATE encounters SET civil_points = v_pc, zombie_points = v_pz,
          grab = COALESCE((o->>'g')::int, 0),
-         mouth_exposed = COALESCE((o->>'exp')::boolean, false),
          noise = COALESCE(e.noise, false) OR v_noise_now,
          civil_fails = COALESCE(e.civil_fails, 0) + CASE WHEN COALESCE((o->>'fail')::boolean, false) THEN 1 ELSE 0 END,
          civil_timed_out = civil_timed_out OR v_c_to, zombie_timed_out = zombie_timed_out OR v_z_to
@@ -1033,8 +1039,8 @@ BEGIN
   END IF;
 
   INSERT INTO encounters (civil_id, zombie_id, started_at, combat_version, round, grab,
-                          mouth_exposed, noise, civil_fails, civil_points, zombie_points)
-  VALUES (v_civil, v_zombie, now(), 6, 1, 0, false, false, 0, 0, 0)
+                          noise, civil_fails, civil_points, zombie_points)
+  VALUES (v_civil, v_zombie, now(), 6, 1, 0, false, 0, 0, 0)
   RETURNING id INTO v_id;
   PERFORM v2_combat_open_round(v_id, 1, 0, now());
   UPDATE players SET current_encounter_id = v_id WHERE id IN (v_civil, v_zombie);
