@@ -1,5 +1,7 @@
 -- =====================================================================
 -- Prion v2.3 — Migración 006: combate v6
+-- APLICADA en prion-mvp el 07/10/2026 (Angel, editor SQL; verificada después
+-- función a función contra la réplica local).
 -- Redactada 07/10/2026 sobre el esquema real de prion-mvp (001–005 aplicadas).
 -- Se aplica en UNA sola transacción (BEGIN ... COMMIT al final del archivo).
 --
