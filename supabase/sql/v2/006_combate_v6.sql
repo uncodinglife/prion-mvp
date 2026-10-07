@@ -1181,8 +1181,10 @@ BEGIN
   PERFORM v2_combat_resolve_round(me.current_encounter_id, v_now);
 
   SELECT * INTO e FROM encounters WHERE id = me.current_encounter_id FOR UPDATE;
+  -- Los rechazos por tiempo no son errores: devuelven el estado con 'error'
+  -- (un RAISE desharía también la resolución que se acaba de hacer).
   IF e.combat_version IS DISTINCT FROM 6 OR e.result IS NOT NULL THEN
-    RAISE EXCEPTION 'El combate ya ha terminado' USING ERRCODE = '22023';
+    RETURN combat_state(e.id) || jsonb_build_object('error', 'combat_over');
   END IF;
   v_role := CASE WHEN v_uid = e.civil_id THEN 'civil' ELSE 'zombie' END;
   v_letter := CASE lower(trim(p_action))
@@ -1196,16 +1198,16 @@ BEGIN
 
   SELECT * INTO r FROM combat_rounds WHERE encounter_id = e.id AND resolved_at IS NULL FOR UPDATE;
   IF NOT FOUND OR v_now < r.opens_at THEN
-    RAISE EXCEPTION 'El asalto aún no ha empezado' USING ERRCODE = '22023';
+    RETURN combat_state(e.id) || jsonb_build_object('error', 'round_not_open');
   END IF;
   IF v_now >= r.deadline THEN
-    RAISE EXCEPTION 'Tiempo agotado' USING ERRCODE = '22023';
+    RETURN combat_state(e.id) || jsonb_build_object('error', 'too_late');
   END IF;
   IF v_letter = 'H' AND r.grab >= 2 THEN
     RAISE EXCEPTION 'Con los dos brazos agarrados no puedes huir' USING ERRCODE = '22023';
   END IF;
   IF (v_role = 'civil' AND r.civil_action IS NOT NULL) OR (v_role = 'zombie' AND r.zombie_action IS NOT NULL) THEN
-    RAISE EXCEPTION 'Ya has decidido en este asalto' USING ERRCODE = '22023';
+    RETURN combat_state(e.id) || jsonb_build_object('error', 'already_decided');
   END IF;
 
   IF v_role = 'civil' THEN

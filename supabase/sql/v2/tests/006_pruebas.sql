@@ -106,6 +106,7 @@ SELECT chk('encuentro v6 con asalto 1 abierto',
 SELECT chk('los dos quedan enlazados al encuentro', (SELECT count(*) = 2 FROM players WHERE current_encounter_id = :'e1'));
 -- El zombie decide; el civil solo sabe que ya ha decidido.
 SELECT chk('zombie muerde', (decide_as(3, 'morder')->>'i_decided')::boolean);
+SELECT chk('decidir dos veces: rechazado', decide_as(3, 'agarrar')->>'error' = 'already_decided');
 SELECT st(1) AS s1 \gset
 SELECT chk('civil ve que el rival ya ha elegido, con frase', (:'s1'::jsonb->>'rival_decided')::boolean AND :'s1'::jsonb->>'rival_ready_msg' IS NOT NULL);
 SELECT chk('y no ve qué ha elegido', :'s1'::jsonb->'rounds' = '[]'::jsonb AND position('morder' in :'s1') = 0);
@@ -125,7 +126,7 @@ SELECT chk('asalto 2 de 10 s tras 5 s de pulso',
    WHERE c2.encounter_id = :'e1' AND c2.round = 2));
 SELECT chk('la boca expuesta no se le muestra a nadie', position('mouth' in st(1)::text) = 0 AND position('mouth' in st(3)::text) = 0);
 -- Decidir durante el pulso: rechazado
-DO $$ BEGIN PERFORM decide_as(1, 'golpear'); RAISE EXCEPTION 'debía fallar'; EXCEPTION WHEN invalid_parameter_value THEN RAISE NOTICE 'ok decidir en el pulso rechazado'; END $$;
+SELECT chk('decidir durante el pulso: rechazado sin error', decide_as(1, 'golpear')->>'error' = 'round_not_open');
 -- G-M (raso): gana el zombie -> 8, infecta, +4 al zombie
 SELECT open_now(:'e1');
 SELECT roll(0.99);
@@ -250,6 +251,7 @@ UPDATE players SET cargo_food = 3 WHERE id = uid(4);
 SELECT fight(4, 5) AS e4 \gset
 UPDATE combat_rounds SET grab = 2 WHERE encounter_id = :'e4' AND round = 1;
 SELECT chk('estado: no puede huir', NOT (st(4)->>'can_flee')::boolean);
+DO $$ BEGIN PERFORM decide_as(4, 'morder'); RAISE EXCEPTION 'debía fallar'; EXCEPTION WHEN invalid_parameter_value THEN RAISE NOTICE 'ok acción ajena al rol rechazada'; END $$;
 DO $$ BEGIN PERFORM decide_as(4, 'huir'); RAISE EXCEPTION 'debía fallar'; EXCEPTION WHEN invalid_parameter_value THEN RAISE NOTICE 'ok huir desactivado con dos brazos'; END $$;
 SELECT expire(:'e4');
 SELECT roll(0.99);
